@@ -12,7 +12,6 @@ Features:
 """
 
 import streamlit as st
-import os
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -121,20 +120,62 @@ st.markdown("""
 
 # ============================================================================
 # DATA LOADING
-# ===========================================================================
+# ============================================================================
 
 @st.cache_data
 def load_data():
-    sample_path = "pnc_indusind_cc_portfolio_sample.csv"
-    full_path = "pnc_indusind_cc_portfolio_1M.csv"
-
-    if os.path.exists(full_path):
-        return pd.read_csv(full_path)
-    elif os.path.exists(sample_path):
-        return pd.read_csv(sample_path)
+    """Load PNC/IndusInd credit card dataset - auto-generate if missing"""
+    import os
+    
+    # Try multiple possible file paths
+    possible_paths = [
+        'pnc_indusind_cc_portfolio_1M.csv',  # Same directory as dashboard
+        '/home/claude/pnc_indusind_cc_portfolio_1M.csv',  # Absolute path
+        './pnc_indusind_cc_portfolio_1M.csv'  # Current directory
+    ]
+    
+    # Check if dataset exists
+    dataset_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            dataset_path = path
+            break
+    
+    # If dataset not found, generate it
+    if dataset_path is None:
+        st.info("📊 Dataset not found. Generating PNC/IndusInd credit card portfolio...")
+        st.info("⏳ This will take ~30-60 seconds. Please wait...")
+        
+        # Import generator
+        try:
+            from pnc_indusind_data_generator import ProfitInsightCCDataGenerator
+        except ImportError:
+            st.error("❌ Error: pnc_indusind_data_generator.py not found in repository.")
+            st.error("Please ensure the file is uploaded to your Streamlit Cloud repository.")
+            st.stop()
+        
+        # Generate dataset (smaller size for cloud deployment)
+        with st.spinner('Generating dataset...'):
+            # Use 250k accounts for faster cloud deployment (instead of 1M)
+            generator = ProfitInsightCCDataGenerator(n_accounts=250_000, random_state=42)
+            df = generator.generate_dataset()
+            
+            # Save to current directory
+            dataset_path = 'pnc_indusind_cc_portfolio_1M.csv'
+            df.to_csv(dataset_path, index=False)
+            
+            st.success("✅ Dataset generated successfully!")
+            st.info(f"📁 Saved to: {dataset_path}")
+            
+        return df
     else:
-        st.error("Dataset not found. Upload a sample CSV or generate one first.")
-        st.stop()
+        # Load existing dataset
+        try:
+            df = pd.read_csv(dataset_path)
+            return df
+        except Exception as e:
+            st.error(f"❌ Error loading dataset: {str(e)}")
+            st.stop()
 
 # ============================================================================
 # HELPER FUNCTIONS
