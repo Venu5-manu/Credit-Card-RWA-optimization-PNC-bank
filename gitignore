@@ -1,0 +1,29 @@
+# Large dataset files (auto-generated on deployment)
+*.csv
+pnc_indusind_cc_portfolio_*.csv
+basel_cc_portfolio_*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/secrets.toml
