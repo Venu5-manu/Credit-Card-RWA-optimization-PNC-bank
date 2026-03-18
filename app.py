@@ -123,13 +123,21 @@ st.markdown("""
 # ============================================================================
 
 @st.cache_data
+import os
+import pandas as pd
+import streamlit as st
+
+@st.cache_data
 def load_data():
-    """Load PNC/IndusInd credit card dataset"""
-    try:
-        df = pd.read_csv('pnc_indusind_cc_portfolio_1M.csv')
-        return df
-    except FileNotFoundError:
-        st.error("⚠️ Dataset not found. Please run pnc_indusind_data_generator.py first.")
+    sample_path = "pnc_indusind_cc_portfolio_sample.csv"
+    full_path = "pnc_indusind_cc_portfolio_1M.csv"
+
+    if os.path.exists(full_path):
+        return pd.read_csv(full_path)
+    elif os.path.exists(sample_path):
+        return pd.read_csv(sample_path)
+    else:
+        st.error("Dataset not found. Upload a sample CSV or generate one first.")
         st.stop()
 
 # ============================================================================
