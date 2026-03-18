@@ -12,6 +12,7 @@ Features:
 """
 
 import streamlit as st
+import os
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -120,12 +121,7 @@ st.markdown("""
 
 # ============================================================================
 # DATA LOADING
-# ============================================================================
-
-@st.cache_data
-import os
-import pandas as pd
-import streamlit as st
+# ===========================================================================
 
 @st.cache_data
 def load_data():
