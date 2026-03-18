@@ -8,4 +8,7 @@ plotly
 matplotlib
 seaborn
 statsmodels
-
+plotly.express 
+plotly.graph_objects
+plotly.subplots
+warnings
