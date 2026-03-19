@@ -1,58 +1,46 @@
-"""
-Profit Insight Basel RWA Analytics Dashboard
-PNC Bank Credit Card Portfolio - US Standardized Approach
+import os
+import warnings
+from datetime import datetime
 
-Features:
-- Multi-tab navigation with Basel-compliant KPIs
-- Stress testing scenarios (PD/LGD/Macro)
-- Transactor vs Revolver analysis
-- Income segment performance
-- RWA optimization pathways
-- Proper Basel terminology on all axes and headings
-"""
-
-import streamlit as st
-import pandas as pd
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from datetime import datetime
-import warnings
-warnings.filterwarnings('ignore')
+import streamlit as st
 
-# ============================================================================
+warnings.filterwarnings("ignore")
+
+# =============================================================================
 # PAGE CONFIGURATION
-# ============================================================================
+# =============================================================================
 
 st.set_page_config(
     page_title="Profit Insight | Basel RWA Analytics",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Profit Insight Branding - Professional Navy/Gold Theme
-st.markdown("""
+# =============================================================================
+# BRANDING / STYLES
+# =============================================================================
+
+st.markdown(
+    """
 <style>
-    /* Profit Insight Brand Colors */
     :root {
         --pi-navy: #1B3B6F;
         --pi-gold: #D4AF37;
         --pi-light-blue: #4A90E2;
         --pi-gray: #F5F7FA;
+        --pi-green: #27AE60;
+        --pi-red: #E74C3C;
     }
-    
+
     .stApp {
         background-color: #FAFBFC;
     }
-    
-    /* Sidebar branding */
-    .css-1d391kg {
-        background: linear-gradient(180deg, #1B3B6F 0%, #2C5282 100%);
-    }
-    
-    /* Main header */
+
     h1 {
         color: #1B3B6F;
         font-weight: 700;
@@ -60,53 +48,52 @@ st.markdown("""
         border-bottom: 4px solid #D4AF37;
         padding-bottom: 15px;
     }
-    
+
     h2 {
         color: #2C5282;
         font-weight: 600;
         margin-top: 25px;
     }
-    
+
     h3 {
         color: #4A90E2;
-        font-weight: 500;
+        font-weight: 600;
     }
-    
-    /* Metric cards */
+
     [data-testid="stMetricValue"] {
-        font-size: 36px;
+        font-size: 34px;
         color: #1B3B6F;
         font-weight: 700;
     }
-    
+
     [data-testid="stMetricDelta"] {
-        font-size: 18px;
+        font-size: 17px;
     }
-    
-    /* Info boxes */
-    .stAlert {
-        background-color: #EBF5FB;
-        border-left: 5px solid #4A90E2;
-    }
-    
-    /* Tabs */
+
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
-    
+
     .stTabs [data-baseweb="tab"] {
         background-color: #E8EDF2;
         border-radius: 8px 8px 0px 0px;
-        padding: 12px 24px;
+        padding: 12px 20px;
         font-weight: 600;
     }
-    
+
     .stTabs [aria-selected="true"] {
         background-color: #1B3B6F;
         color: white !important;
     }
-    
-    /* Branding footer */
+
+    .chart-note {
+        background-color: #F7FAFC;
+        border-left: 4px solid #4A90E2;
+        padding: 12px 14px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+    }
+
     .pi-footer {
         text-align: center;
         color: #6B7280;
@@ -116,217 +103,152 @@ st.markdown("""
         font-size: 14px;
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
-# ============================================================================
-# DATA LOADING
-# ============================================================================
+# =============================================================================
+# FORMATTING HELPERS
+# =============================================================================
 
-@st.cache_data
-def load_data():
-    """Load PNC/IndusInd credit card dataset - auto-generate if missing"""
-    import os
-    
-    # Try multiple possible file paths
-    possible_paths = [
-        'pnc_indusind_cc_portfolio_1M.csv',  # Same directory as dashboard
-        '/home/claude/pnc_indusind_cc_portfolio_1M.csv',  # Absolute path
-        './pnc_indusind_cc_portfolio_1M.csv'  # Current directory
-    ]
-    
-    # Check if dataset exists
-    dataset_path = None
-    for path in possible_paths:
-        if os.path.exists(path):
-            dataset_path = path
-            break
-    
-    # If dataset not found, generate it
-    if dataset_path is None:
-        st.info("📊 Dataset not found. Generating PNC/IndusInd credit card portfolio...")
-        st.info("⏳ This will take ~30-60 seconds. Please wait...")
-        
-        # Import generator
-        try:
-            from pnc_indusind_data_generator import ProfitInsightCCDataGenerator
-        except ImportError:
-            st.error("❌ Error: pnc_indusind_data_generator.py not found in repository.")
-            st.error("Please ensure the file is uploaded to your Streamlit Cloud repository.")
-            st.stop()
-        
-        # Generate dataset (smaller size for cloud deployment)
-        with st.spinner('Generating dataset...'):
-            # Use 250k accounts for faster cloud deployment (instead of 1M)
-            generator = ProfitInsightCCDataGenerator(n_accounts=250_000, random_state=42)
-            df = generator.generate_dataset()
-            
-            # Save to current directory
-            dataset_path = 'pnc_indusind_cc_portfolio_1M.csv'
-            df.to_csv(dataset_path, index=False)
-            
-            st.success("✅ Dataset generated successfully!")
-            st.info(f"📁 Saved to: {dataset_path}")
-            
-        return df
-    else:
-        # Load existing dataset
-        try:
-            df = pd.read_csv(dataset_path)
-            return df
-        except Exception as e:
-            st.error(f"❌ Error loading dataset: {str(e)}")
-            st.stop()
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
 
 def format_currency(value, decimals=2):
-    """Format value as currency"""
     if abs(value) >= 1e9:
-        return f"${value/1e9:,.{decimals}f}B"
-    elif abs(value) >= 1e6:
-        return f"${value/1e6:,.{decimals}f}M"
-    elif abs(value) >= 1e3:
-        return f"${value/1e3:,.{decimals}f}K"
-    else:
-        return f"${value:,.{decimals}f}"
+        return f"${value / 1e9:,.{decimals}f}B"
+    if abs(value) >= 1e6:
+        return f"${value / 1e6:,.{decimals}f}M"
+    if abs(value) >= 1e3:
+        return f"${value / 1e3:,.{decimals}f}K"
+    return f"${value:,.{decimals}f}"
+
 
 def format_percentage(value, decimals=2):
-    """Format value as percentage"""
-    return f"{value*100:.{decimals}f}%"
+    return f"{value * 100:.{decimals}f}%"
+
 
 def format_bps(value):
-    """Format value as basis points"""
-    return f"{value*10000:.0f} bps"
+    return f"{value * 10000:.0f} bps"
 
-def calculate_rwa_reduction(df):
-    """Calculate RWA reduction potential from optimization pathways"""
-    
-    # Pathway 1: Transactor Credit Limit Reduction (30% reduction scenario)
-    transactors = df[df['is_transactor'] == 1].copy()
-    reduction_pct = 0.30  # 30% limit reduction
-    
-    # Calculate new exposures after limit reduction
-    new_limit = transactors['credit_limit'] * (1 - reduction_pct)
-    new_unused = new_limit - transactors['cc_outstanding_b']
-    new_unused = new_unused.clip(lower=0)  # Can't be negative
-    
-    # New EAD with reduced limits
-    new_ead = transactors['cc_outstanding_b'] + new_unused * 0.10
-    new_rwa_transactor = new_ead * 1.0
-    
-    # RWA saved from transactor optimization
-    rwa_saved_transactor = (transactors['total_cc_rwa_b'].sum() - new_rwa_transactor.sum())
-    
-    # Pathway 2: Overdraft Conversion (eligible accounts)
-    eligible_od = df[df['eligible_for_overdraft_conversion'] == 1].copy()
-    
-    # Assume 20% of eligible get overdraft, 80% netting coverage
-    od_conversion_rate = 0.20
-    netting_coverage = 0.80
-    
-    # Reduced exposure from overdraft netting
-    od_accounts = eligible_od.sample(frac=od_conversion_rate, random_state=42)
-    od_ead_reduction = od_accounts['ead_b'].sum() * netting_coverage
-    rwa_saved_overdraft = od_ead_reduction * 1.0
-    
-    # Total RWA reduction
-    total_rwa_reduction = rwa_saved_transactor + rwa_saved_overdraft
-    
-    # Calculate capital relief (8.5% Tier 1)
-    tier1_relief = total_rwa_reduction * 0.085
-    
-    return {
-        'total_rwa_reduction': total_rwa_reduction,
-        'transactor_pathway': rwa_saved_transactor,
-        'overdraft_pathway': rwa_saved_overdraft,
-        'tier1_relief': tier1_relief,
-        'reduction_pct': (total_rwa_reduction / df['total_cc_rwa_b'].sum()) * 100
-    }
 
-# ============================================================================
-# BASEL REGULATORY DICTIONARY
-# ============================================================================
+# =============================================================================
+# DATA LOADING
+# =============================================================================
+
+
+@st.cache_data(show_spinner=False)
+def load_data():
+    """
+    Load dataset in this priority:
+    1) full 1M CSV
+    2) sample CSV
+    3) generate 100k from generator file
+    """
+    full_path = "pnc_indusind_cc_portfolio_1M.csv"
+    sample_path = "pnc_indusind_cc_portfolio_sample.csv"
+
+    if os.path.exists(full_path):
+        return pd.read_csv(full_path), "Loaded full dataset"
+    if os.path.exists(sample_path):
+        return pd.read_csv(sample_path), "Loaded sample dataset"
+
+    generator_file = "pnc_indusind_data_generator.py"
+    if os.path.exists(generator_file):
+        try:
+            from pnc_indusind_data_generator import ProfitInsightCCDataGenerator
+
+            generator = ProfitInsightCCDataGenerator(n_accounts=100_000)
+            df = generator.generate_dataset()
+            return df, "Generated 100K dataset from generator file"
+        except Exception as exc:
+            st.error(f"Dataset generation failed: {exc}")
+            st.stop()
+
+    st.error(
+        "⚠️ Dataset not found. Please add either "
+        "`pnc_indusind_cc_portfolio_sample.csv` or `pnc_indusind_cc_portfolio_1M.csv` "
+        "or keep `pnc_indusind_data_generator.py` in the repo."
+    )
+    st.stop()
+
+
+# =============================================================================
+# BASEL DICTIONARY
+# =============================================================================
 
 BASEL_DICTIONARY = {
-    'EAD': {
-        'term': 'Exposure at Default',
-        'formula': 'EAD = Outstanding + (Unused × CCF)',
-        'us_sa': 'Outstanding + (Unused × 10%)',
-        'reference': '12 CFR Part 3 §3.33'
+    "EAD": {
+        "term": "Exposure at Default",
+        "formula": "EAD = Outstanding + (Unused × CCF)",
+        "us_sa": "Outstanding + (Unused × 10%)",
+        "reference": "12 CFR Part 3 §3.33",
     },
-    'RWA': {
-        'term': 'Risk-Weighted Assets',
-        'formula': 'RWA = EAD × Risk Weight',
-        'us_sa': 'EAD × 100% for credit cards',
-        'reference': '12 CFR Part 3 §3.32(l)'
+    "RWA": {
+        "term": "Risk-Weighted Assets",
+        "formula": "RWA = EAD × Risk Weight",
+        "us_sa": "EAD × 100% for credit cards",
+        "reference": "12 CFR Part 3 §3.32(l)",
     },
-    'CCF': {
-        'term': 'Credit Conversion Factor',
-        'formula': 'Off-Balance = Unused × CCF',
-        'us_sa': '10% for unconditionally cancellable lines',
-        'reference': '12 CFR Part 3 §3.33(b)(2)'
+    "CCF": {
+        "term": "Credit Conversion Factor",
+        "formula": "Off-Balance = Unused × CCF",
+        "us_sa": "10% for unconditionally cancellable lines",
+        "reference": "12 CFR Part 3 §3.33(b)(2)",
     },
-    'Tier 1 Ratio': {
-        'term': 'Tier 1 Capital / RWA',
-        'formula': 'T1 Ratio = Tier 1 Capital / Total RWA',
-        'us_sa': 'Minimum 8.5% (4.5% + 2.5% buffer + 1.5% AT1)',
-        'reference': 'Basel III + 12 CFR Part 3 §3.11'
+    "Tier 1 Ratio": {
+        "term": "Tier 1 Capital / RWA",
+        "formula": "Tier 1 Ratio = Tier 1 Capital / Total RWA",
+        "us_sa": "Minimum 8.5% used here for capital requirement proxy",
+        "reference": "Basel III + 12 CFR Part 3 §3.11",
     },
-    'NCO': {
-        'term': 'Net Charge-Off Rate',
-        'formula': 'NCO = Charge-offs − Recoveries',
-        'us_sa': 'Annualized % of average balances',
-        'reference': 'FDIC Call Report'
-    }
+    "NCO": {
+        "term": "Net Charge-Off Rate",
+        "formula": "NCO = Charge-offs − Recoveries",
+        "us_sa": "Annualized % of balances",
+        "reference": "FDIC Call Report",
+    },
 }
 
+
 def show_basel_dictionary():
-    """Display Basel dictionary in sidebar"""
     with st.sidebar.expander("📖 Basel Regulatory Dictionary", expanded=False):
         term = st.selectbox(
-            "Select Basel term:",
+            "Select Basel term",
             options=list(BASEL_DICTIONARY.keys()),
-            format_func=lambda x: f"{x} - {BASEL_DICTIONARY[x]['term']}"
+            format_func=lambda x: f"{x} - {BASEL_DICTIONARY[x]['term']}",
         )
-        
         info = BASEL_DICTIONARY[term]
         st.markdown(f"**{term}** - {info['term']}")
-        st.code(f"General: {info['formula']}", language='text')
-        st.code(f"US SA: {info['us_sa']}", language='text')
-        st.caption(f"📌 Reference: {info['reference']}")
+        st.code(f"General: {info['formula']}", language="text")
+        st.code(f"US SA: {info['us_sa']}", language="text")
+        st.caption(f"Reference: {info['reference']}")
 
-# ============================================================================
-# SIDEBAR FILTERS & CONTROLS
-# ============================================================================
+
+# =============================================================================
+# SIDEBAR
+# =============================================================================
+
 
 def create_sidebar_filters(df):
-    """Create Profit Insight sidebar with filters and stress scenarios"""
-    
-    # Profit Insight Header
-    st.sidebar.markdown("""
-    <div style='text-align: center; padding: 20px 0;'>
-        <h1 style='color: #D4AF37; font-size: 24px; margin: 0;'>PROFIT INSIGHT</h1>
-        <p style='color: #9CA3AF; font-size: 12px; margin: 5px 0;'>Basel RWA Analytics Platform</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
+    st.sidebar.markdown(
+        """
+        <div style='text-align: center; padding: 20px 0;'>
+            <h1 style='color: #D4AF37; font-size: 24px; margin: 0;'>PROFIT INSIGHT</h1>
+            <p style='color: #9CA3AF; font-size: 12px; margin: 5px 0;'>Basel RWA Analytics Platform</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.sidebar.markdown("---")
-    
-    # Stress Testing Mode
+
     st.sidebar.title("📊 Stress Testing")
-    
     stress_mode = st.sidebar.checkbox("Enable Stress Scenarios", value=False)
-    
+
     if stress_mode:
-        st.sidebar.subheader("Scenario Parameters")
-        
         scenario_type = st.sidebar.selectbox(
             "Pre-defined Scenario",
-            ["Custom", "Baseline", "Mild Recession", "Severe Recession", "Financial Crisis"]
+            ["Custom", "Baseline", "Mild Recession", "Severe Recession", "Financial Crisis"],
         )
-        
+
         if scenario_type == "Baseline":
             pd_stress, nco_stress, macro_stress = 1.0, 1.0, 1.0
         elif scenario_type == "Mild Recession":
@@ -335,1338 +257,1276 @@ def create_sidebar_filters(df):
             pd_stress, nco_stress, macro_stress = 2.5, 2.0, 0.85
         elif scenario_type == "Financial Crisis":
             pd_stress, nco_stress, macro_stress = 4.0, 3.5, 0.70
-        else:  # Custom
+        else:
             pd_stress = st.sidebar.slider("PD Stress Factor", 0.5, 5.0, 1.0, 0.1)
             nco_stress = st.sidebar.slider("NCO Stress Factor", 0.5, 5.0, 1.0, 0.1)
             macro_stress = st.sidebar.slider("GDP Impact", 0.5, 1.2, 1.0, 0.05)
     else:
-        pd_stress, nco_stress, macro_stress = 1.0, 1.0, 1.0
         scenario_type = "Baseline"
-    
+        pd_stress, nco_stress, macro_stress = 1.0, 1.0, 1.0
+
     st.sidebar.markdown("---")
-    
-    # Portfolio Filters
     st.sidebar.title("🔧 Portfolio Filters")
-    
-    # Income Segment Filter
+
     income_segments = st.sidebar.multiselect(
         "Income Segments",
-        options=df['income_segment'].unique(),
-        default=df['income_segment'].unique()
+        options=sorted(df["income_segment"].dropna().unique()),
+        default=sorted(df["income_segment"].dropna().unique()),
     )
-    
-    # Behavioral Type Filter
+
     behavioral_types = st.sidebar.multiselect(
         "Behavioral Type",
-        options=['Transactor', 'Revolver'],
-        default=['Transactor', 'Revolver']
+        options=sorted(df["behavioral_type"].dropna().unique()),
+        default=sorted(df["behavioral_type"].dropna().unique()),
     )
-    
-    # FICO Tier Filter
+
     fico_tiers = st.sidebar.multiselect(
         "FICO Risk Tier",
-        options=df['fico_tier'].unique(),
-        default=df['fico_tier'].unique()
+        options=sorted(df["fico_tier"].dropna().unique()),
+        default=sorted(df["fico_tier"].dropna().unique()),
     )
-    
-    # Region Filter
+
     regions = st.sidebar.multiselect(
         "Geographic Region",
-        options=df['region'].unique(),
-        default=df['region'].unique()
+        options=sorted(df["region"].dropna().unique()),
+        default=sorted(df["region"].dropna().unique()),
     )
-    
-    # Card Type Filter
+
     card_types = st.sidebar.multiselect(
         "Card Type",
-        options=df['card_type'].unique(),
-        default=df['card_type'].unique()
+        options=sorted(df["card_type"].dropna().unique()),
+        default=sorted(df["card_type"].dropna().unique()),
     )
-    
-    # Vintage Range
+
     vintage_range = st.sidebar.slider(
         "Account Vintage (Months)",
-        min_value=int(df['vintage_months'].min()),
-        max_value=int(df['vintage_months'].max()),
-        value=(int(df['vintage_months'].min()), int(df['vintage_months'].max()))
+        min_value=int(df["vintage_months"].min()),
+        max_value=int(df["vintage_months"].max()),
+        value=(int(df["vintage_months"].min()), int(df["vintage_months"].max())),
     )
-    
-    # FICO Score Range
+
     fico_range = st.sidebar.slider(
         "FICO Score Range",
-        min_value=int(df['fico_score'].min()),
-        max_value=int(df['fico_score'].max()),
-        value=(int(df['fico_score'].min()), int(df['fico_score'].max()))
+        min_value=int(df["fico_score"].min()),
+        max_value=int(df["fico_score"].max()),
+        value=(int(df["fico_score"].min()), int(df["fico_score"].max())),
     )
-    
+
     st.sidebar.markdown("---")
-    
-    # Basel Dictionary
     show_basel_dictionary()
-    
+
     return {
-        'stress_mode': stress_mode,
-        'scenario_type': scenario_type,
-        'pd_stress': pd_stress,
-        'nco_stress': nco_stress,
-        'macro_stress': macro_stress,
-        'income_segments': income_segments,
-        'behavioral_types': behavioral_types,
-        'fico_tiers': fico_tiers,
-        'regions': regions,
-        'card_types': card_types,
-        'vintage_range': vintage_range,
-        'fico_range': fico_range
+        "stress_mode": stress_mode,
+        "scenario_type": scenario_type,
+        "pd_stress": pd_stress,
+        "nco_stress": nco_stress,
+        "macro_stress": macro_stress,
+        "income_segments": income_segments,
+        "behavioral_types": behavioral_types,
+        "fico_tiers": fico_tiers,
+        "regions": regions,
+        "card_types": card_types,
+        "vintage_range": vintage_range,
+        "fico_range": fico_range,
     }
 
-# ============================================================================
-# DATA FILTERING & STRESS APPLICATION
-# ============================================================================
+
+# =============================================================================
+# FILTER / STRESS
+# =============================================================================
+
 
 def apply_filters_and_stress(df, filters):
-    """Apply filters and stress scenarios to dataset"""
     df_filtered = df.copy()
-    
-    # Apply stress scenarios
-    if filters['stress_mode']:
-        df_filtered['pd'] = df_filtered['pd_base'] * filters['pd_stress']
-        df_filtered['nco_rate'] = df_filtered['nco_rate'] * filters['nco_stress']
-        df_filtered['expected_loss_b'] = (
-            df_filtered['ead_b'] * df_filtered['pd'] * df_filtered['lgd']
+
+    if filters["stress_mode"]:
+        df_filtered["pd"] = df_filtered["pd_base"] * filters["pd_stress"]
+        df_filtered["nco_rate"] = df_filtered["nco_rate"] * filters["nco_stress"]
+        df_filtered["expected_loss_b"] = (
+            df_filtered["ead_b"] * df_filtered["pd"] * df_filtered["lgd"]
         )
-        # Recalculate net income with stressed losses
-        df_filtered['net_income_b'] = (
-            df_filtered['total_revenue_b'] -
-            df_filtered['funding_cost_b'] -
-            df_filtered['operating_expense_b'] -
-            df_filtered['expected_loss_b']
+        df_filtered["net_income_b"] = (
+            df_filtered["total_revenue_b"]
+            - df_filtered["funding_cost_b"]
+            - df_filtered["operating_expense_b"]
+            - df_filtered["expected_loss_b"]
         )
-    
-    # Apply portfolio filters
+        df_filtered["roa"] = (
+            df_filtered["net_income_b"] * 12 / df_filtered["ead_b"].replace(0, 1)
+        )
+        df_filtered["roe"] = (
+            df_filtered["net_income_b"] * 12
+            / (df_filtered["total_cc_rwa_b"] * 0.085).replace(0, 1)
+        )
+
     df_filtered = df_filtered[
-        (df_filtered['income_segment'].isin(filters['income_segments'])) &
-        (df_filtered['behavioral_type'].isin(filters['behavioral_types'])) &
-        (df_filtered['fico_tier'].isin(filters['fico_tiers'])) &
-        (df_filtered['region'].isin(filters['regions'])) &
-        (df_filtered['card_type'].isin(filters['card_types'])) &
-        (df_filtered['vintage_months'] >= filters['vintage_range'][0]) &
-        (df_filtered['vintage_months'] <= filters['vintage_range'][1]) &
-        (df_filtered['fico_score'] >= filters['fico_range'][0]) &
-        (df_filtered['fico_score'] <= filters['fico_range'][1])
-    ]
-    
+        (df_filtered["income_segment"].isin(filters["income_segments"]))
+        & (df_filtered["behavioral_type"].isin(filters["behavioral_types"]))
+        & (df_filtered["fico_tier"].isin(filters["fico_tiers"]))
+        & (df_filtered["region"].isin(filters["regions"]))
+        & (df_filtered["card_type"].isin(filters["card_types"]))
+        & (df_filtered["vintage_months"] >= filters["vintage_range"][0])
+        & (df_filtered["vintage_months"] <= filters["vintage_range"][1])
+        & (df_filtered["fico_score"] >= filters["fico_range"][0])
+        & (df_filtered["fico_score"] <= filters["fico_range"][1])
+    ].copy()
+
     return df_filtered
 
-# ============================================================================
-# VISUALIZATION FUNCTIONS
-# ============================================================================
 
-def plot_portfolio_overview(df):
-    """Portfolio Overview Tab Charts"""
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Chart 1: EAD by Income Segment ($ Billions)
-        segment_ead = df.groupby('income_segment')['ead_b'].sum().reset_index()
-        segment_ead['ead_b'] = segment_ead['ead_b'] / 1e9
-        
-        fig = px.bar(
-            segment_ead,
-            x='income_segment',
-            y='ead_b',
-            title='Exposure at Default (EAD) by Income Segment',
-            labels={'ead_b': 'Total EAD ($B)', 'income_segment': 'Income Segment'},
-            color='ead_b',
-            color_continuous_scale='Blues'
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            showlegend=False,
-            yaxis_title='Total EAD ($B)',
-            xaxis_title='Income Segment'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Chart 2: RWA by Behavioral Type ($ Billions)
-        behavioral_rwa = df.groupby('behavioral_type')['total_cc_rwa_b'].sum().reset_index()
-        behavioral_rwa['total_cc_rwa_b'] = behavioral_rwa['total_cc_rwa_b'] / 1e9
-        
-        fig = px.pie(
-            behavioral_rwa,
-            values='total_cc_rwa_b',
-            names='behavioral_type',
-            title='Risk-Weighted Assets (RWA) by Behavioral Type',
-            color_discrete_sequence=['#1B3B6F', '#D4AF37']
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
-        )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        # Chart 3: FICO Score Distribution (Accounts)
-        fig = px.histogram(
-            df,
-            x='fico_score',
-            nbins=50,
-            title='FICO Score Distribution',
-            labels={'fico_score': 'FICO Score', 'count': 'Number of Accounts'},
-            color_discrete_sequence=['#4A90E2']
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='FICO Score',
-            yaxis_title='Number of Accounts'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col4:
-        # Chart 4: Utilization Rate Distribution (%)
-        fig = px.histogram(
-            df,
-            x='utilization_rate',
-            nbins=50,
-            title='Credit Utilization Rate Distribution',
-            labels={'utilization_rate': 'Utilization Rate', 'count': 'Number of Accounts'},
-            color_discrete_sequence=['#2C5282']
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Utilization Rate (%)',
-            yaxis_title='Number of Accounts',
-            xaxis_tickformat='.0%'
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# =============================================================================
+# OPTIMIZATION / FINAL RWA
+# =============================================================================
 
-def plot_risk_analytics(df):
-    """Risk Analytics Tab Charts"""
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Chart 5: PD Distribution by FICO Tier (%)
-        fig = px.box(
-            df,
-            x='fico_tier',
-            y='pd',
-            title='Probability of Default (PD) by FICO Tier',
-            labels={'pd': 'PD (%)', 'fico_tier': 'FICO Risk Tier'},
-            color='fico_tier',
-            color_discrete_sequence=px.colors.sequential.Reds
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_tickformat='.2%',
-            yaxis_title='Probability of Default (PD) %',
-            xaxis_title='FICO Risk Tier',
-            showlegend=False
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Chart 6: NCO Rate by Income Segment (bps)
-        nco_by_segment = df.groupby('income_segment')['nco_rate'].mean().reset_index()
-        
-        fig = px.bar(
-            nco_by_segment,
-            x='income_segment',
-            y='nco_rate',
-            title='Net Charge-Off (NCO) Rate by Income Segment',
-            labels={'nco_rate': 'NCO Rate (%)', 'income_segment': 'Income Segment'},
-            color='nco_rate',
-            color_continuous_scale='Oranges'
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_tickformat='.2%',
-            yaxis_title='NCO Rate (%)',
-            xaxis_title='Income Segment'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        # Chart 7: Expected Loss by Segment ($ Millions)
-        el_by_segment = df.groupby('income_segment')['expected_loss_b'].sum().reset_index()
-        el_by_segment['expected_loss_b'] = el_by_segment['expected_loss_b'] / 1e6
-        
-        fig = px.pie(
-            el_by_segment,
-            values='expected_loss_b',
-            names='income_segment',
-            title='Expected Loss (EL) Distribution by Income Segment',
-            color_discrete_sequence=px.colors.sequential.YlOrRd
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
-        )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col4:
-        # Chart 8: FICO Score vs PD Scatter
-        sample = df.sample(min(10000, len(df)))
-        fig = px.scatter(
-            sample,
-            x='fico_score',
-            y='pd',
-            color='behavioral_type',
-            title='FICO Score vs Probability of Default (PD)',
-            labels={'fico_score': 'FICO Score', 'pd': 'PD (%)'},
-            opacity=0.6,
-            color_discrete_map={'Transactor': '#1B3B6F', 'Revolver': '#D4AF37'}
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_tickformat='.1%',
-            xaxis_title='FICO Score',
-            yaxis_title='Probability of Default (PD) %'
-        )
-        st.plotly_chart(fig, use_container_width=True)
 
-def plot_exposure_analysis(df):
-    """Exposure & Balance Analysis Charts"""
-    
+def calculate_rwa_reduction(df):
+    transactors = df[df["is_transactor"] == 1].copy()
+    reduction_pct = 0.30
+
+    if len(transactors) > 0:
+        new_limit = transactors["credit_limit"] * (1 - reduction_pct)
+        new_unused = (new_limit - transactors["cc_outstanding_b"]).clip(lower=0)
+        new_ead = transactors["cc_outstanding_b"] + new_unused * 0.10
+        new_rwa_transactor = new_ead * 1.0
+        rwa_saved_transactor = (
+            transactors["total_cc_rwa_b"].sum() - new_rwa_transactor.sum()
+        )
+    else:
+        rwa_saved_transactor = 0.0
+
+    eligible_od = df[df["eligible_for_overdraft_conversion"] == 1].copy()
+    if len(eligible_od) > 0:
+        od_conversion_rate = 0.20
+        netting_coverage = 0.80
+        od_accounts = eligible_od.sample(
+            frac=min(od_conversion_rate, 1.0), random_state=42
+        )
+        od_ead_reduction = od_accounts["ead_b"].sum() * netting_coverage
+        rwa_saved_overdraft = od_ead_reduction * 1.0
+    else:
+        rwa_saved_overdraft = 0.0
+
+    total_rwa = df["total_cc_rwa_b"].sum()
+    total_rwa_reduction = max(rwa_saved_transactor + rwa_saved_overdraft, 0.0)
+    final_rwa = max(total_rwa - total_rwa_reduction, 0.0)
+    tier1_relief = total_rwa_reduction * 0.085
+
+    return {
+        "current_rwa": total_rwa,
+        "total_rwa_reduction": total_rwa_reduction,
+        "transactor_pathway": rwa_saved_transactor,
+        "overdraft_pathway": rwa_saved_overdraft,
+        "final_rwa": final_rwa,
+        "tier1_relief": tier1_relief,
+        "reduction_pct": (total_rwa_reduction / total_rwa * 100) if total_rwa else 0.0,
+    }
+
+
+# =============================================================================
+# CHART EXPLAINER HELPER
+# =============================================================================
+
+
+def render_chart_with_explainer(
+    fig,
+    expander_title,
+    x_axis_text,
+    y_axis_text,
+    interpretation_text,
+    insight_text,
+):
+    st.plotly_chart(fig, use_container_width=True)
+    with st.expander(f"📘 {expander_title}", expanded=False):
+        st.markdown(f"**X-axis:** {x_axis_text}")
+        st.markdown(f"**Y-axis:** {y_axis_text}")
+        st.markdown(f"**How to read this:** {interpretation_text}")
+        st.markdown(f"**What this shows:** {insight_text}")
+
+
+# =============================================================================
+# CHARTS
+# =============================================================================
+
+
+def plot_rwa_summary_charts(df, rwa_reduction):
+    st.subheader("Current vs Final RWA Snapshot")
+
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Chart 9: On-Balance vs Off-Balance Exposure ($B)
-        exposure_comp = pd.DataFrame({
-            'Exposure Type': ['On-Balance\n(Drawn)', 'Off-Balance\n(Undrawn × 10% CCF)'],
-            'Amount ($B)': [
-                df['on_balance_exposure_b'].sum() / 1e9,
-                df['off_balance_exposure_b'].sum() / 1e9
-            ]
-        })
-        
-        fig = px.bar(
-            exposure_comp,
-            x='Exposure Type',
-            y='Amount ($B)',
-            title='On-Balance vs Off-Balance Exposure Components',
-            labels={'Amount ($B)': 'Total Exposure ($B)'},
-            color='Exposure Type',
-            color_discrete_map={
-                'On-Balance\n(Drawn)': '#1B3B6F',
-                'Off-Balance\n(Undrawn × 10% CCF)': '#4A90E2'
+        summary_df = pd.DataFrame(
+            {
+                "Metric": ["Current RWA", "Target / Final RWA", "RWA Reduction"],
+                "Amount": [
+                    rwa_reduction["current_rwa"] / 1e6,
+                    rwa_reduction["final_rwa"] / 1e6,
+                    rwa_reduction["total_rwa_reduction"] / 1e6,
+                ],
             }
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            showlegend=False,
-            yaxis_title='Total Exposure ($B)',
-            xaxis_title='Exposure Component'
+
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    x=summary_df["Metric"],
+                    y=summary_df["Amount"],
+                    text=summary_df["Amount"].round(1),
+                    textposition="outside",
+                )
+            ]
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        fig.update_layout(
+            title="Current RWA vs Final RWA",
+            xaxis_title="Scenario",
+            yaxis_title="RWA ($M)",
+            title_font_color="#1B3B6F",
+        )
+
+        render_chart_with_explainer(
+            fig,
+            "Current RWA vs Final RWA explanation",
+            "Scenario buckets: current portfolio RWA, optimized/final RWA, and reduction amount.",
+            "Risk-weighted assets measured in millions of dollars.",
+            "Higher bars mean more capital-consuming exposure. The gap between current and final shows the optimization benefit.",
+            "This chart answers the basic business question: how much RWA exists now, how much can be removed, and where the portfolio lands after reduction.",
+        )
+
     with col2:
-        # Chart 10: Credit Limit Distribution by Income Segment ($)
+        fig = go.Figure(
+            go.Waterfall(
+                x=["Current RWA", "Optimization Benefit", "Final RWA"],
+                y=[
+                    rwa_reduction["current_rwa"] / 1e6,
+                    -(rwa_reduction["total_rwa_reduction"] / 1e6),
+                    rwa_reduction["final_rwa"] / 1e6,
+                ],
+                measure=["absolute", "relative", "total"],
+                text=[
+                    f"${rwa_reduction['current_rwa']/1e6:,.1f}M",
+                    f"-${rwa_reduction['total_rwa_reduction']/1e6:,.1f}M",
+                    f"${rwa_reduction['final_rwa']/1e6:,.1f}M",
+                ],
+                textposition="outside",
+                connector={"line": {"color": "#6B7280"}},
+            )
+        )
+        fig.update_layout(
+            title="RWA Reduction Waterfall",
+            yaxis_title="RWA ($M)",
+            title_font_color="#1B3B6F",
+            showlegend=False,
+        )
+
+        render_chart_with_explainer(
+            fig,
+            "RWA waterfall explanation",
+            "The steps in the optimization story: starting point, savings, and end point.",
+            "RWA in millions of dollars.",
+            "The first column is the starting burden, the middle step shows what is removed, and the last bar is the final optimized level.",
+            "This is the easiest chart for management to understand because it tells the before-and-after story in one visual.",
+        )
+
+
+def plot_portfolio_overview(df):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        segment_ead = df.groupby("income_segment", as_index=False)["ead_b"].sum()
+        segment_ead["ead_b"] = segment_ead["ead_b"] / 1e9
+
+        fig = px.bar(
+            segment_ead,
+            x="income_segment",
+            y="ead_b",
+            title="Exposure at Default (EAD) by Income Segment",
+            labels={"ead_b": "Total EAD ($B)", "income_segment": "Income Segment"},
+            color="ead_b",
+            color_continuous_scale="Blues",
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "EAD by income segment explanation",
+            "Income segment buckets such as Mass Market, Mid Market, Affluent, and High Net Worth.",
+            "Total exposure at default in billions of dollars.",
+            "Taller bars mean that segment contributes more exposure if customers default. This is your exposure concentration view.",
+            "This chart shows where portfolio size sits across customer segments and which segment drives Basel exposure the most.",
+        )
+
+    with col2:
+        behavioral_rwa = df.groupby("behavioral_type", as_index=False)["total_cc_rwa_b"].sum()
+        behavioral_rwa["total_cc_rwa_b"] = behavioral_rwa["total_cc_rwa_b"] / 1e9
+
+        fig = px.pie(
+            behavioral_rwa,
+            values="total_cc_rwa_b",
+            names="behavioral_type",
+            title="Risk-Weighted Assets (RWA) by Behavioral Type",
+            color_discrete_sequence=["#1B3B6F", "#D4AF37"],
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+        fig.update_traces(textposition="inside", textinfo="percent+label")
+
+        render_chart_with_explainer(
+            fig,
+            "RWA by behavioral type explanation",
+            "Behavioral groups: Transactor vs Revolver.",
+            "Each slice represents share of total RWA.",
+            "A bigger slice means that customer behavior type consumes more regulatory capital.",
+            "This helps you see whether the RWA burden is dominated by revolving customers or customers who tend to pay off balances.",
+        )
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        fig = px.histogram(
+            df,
+            x="fico_score",
+            nbins=50,
+            title="FICO Score Distribution",
+            labels={"fico_score": "FICO Score", "count": "Number of Accounts"},
+            color_discrete_sequence=["#4A90E2"],
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "FICO distribution explanation",
+            "FICO score bands from lower-risk to higher-risk borrowers.",
+            "Number of accounts in each score band.",
+            "Bars show where most customers sit on the credit-quality spectrum. A shift to the right means better credit quality.",
+            "This gives the risk-quality shape of the portfolio and helps explain PD patterns later in the dashboard.",
+        )
+
+    with col4:
+        fig = px.histogram(
+            df,
+            x="utilization_rate",
+            nbins=50,
+            title="Credit Utilization Rate Distribution",
+            labels={"utilization_rate": "Utilization Rate", "count": "Number of Accounts"},
+            color_discrete_sequence=["#2C5282"],
+        )
+        fig.update_layout(title_font_color="#1B3B6F", xaxis_tickformat=".0%")
+
+        render_chart_with_explainer(
+            fig,
+            "Utilization distribution explanation",
+            "Utilization rate from low usage to high line usage.",
+            "Number of accounts in each utilization bucket.",
+            "Bars on the left mean customers are using little of their limit. Bars on the right mean customers are using much more of their available credit.",
+            "This chart shows how much of total card limits are actually being used, which is important for EAD and limit optimization opportunities.",
+        )
+
+
+def plot_risk_analytics(df):
+    col1, col2 = st.columns(2)
+
+    with col1:
         fig = px.box(
             df,
-            x='income_segment',
-            y='credit_limit',
-            title='Credit Limit Distribution by Income Segment',
-            labels={'credit_limit': 'Credit Limit ($)', 'income_segment': 'Income Segment'},
-            color='income_segment'
+            x="fico_tier",
+            y="pd",
+            title="Probability of Default (PD) by FICO Tier",
+            labels={"pd": "PD (%)", "fico_tier": "FICO Risk Tier"},
+            color="fico_tier",
+            color_discrete_sequence=px.colors.sequential.Reds,
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_title='Credit Limit ($)',
-            xaxis_title='Income Segment',
-            showlegend=False
+        fig.update_layout(title_font_color="#1B3B6F", yaxis_tickformat=".2%", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "PD by FICO tier explanation",
+            "FICO risk tiers ordered from stronger to weaker credit quality.",
+            "Probability of default as a percentage.",
+            "Higher boxes mean that tier carries a higher default likelihood. The spread of the box shows variation within the tier.",
+            "This confirms the expected credit story: weaker FICO tiers should carry higher PD and therefore higher expected loss.",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+
+    with col2:
+        nco_by_segment = df.groupby("income_segment", as_index=False)["nco_rate"].mean()
+        fig = px.bar(
+            nco_by_segment,
+            x="income_segment",
+            y="nco_rate",
+            title="Net Charge-Off (NCO) Rate by Income Segment",
+            labels={"nco_rate": "NCO Rate (%)", "income_segment": "Income Segment"},
+            color="nco_rate",
+            color_continuous_scale="Oranges",
+        )
+        fig.update_layout(title_font_color="#1B3B6F", yaxis_tickformat=".2%")
+
+        render_chart_with_explainer(
+            fig,
+            "NCO by income segment explanation",
+            "Income segments.",
+            "Average net charge-off rate.",
+            "Taller bars mean a segment is losing more balance through write-offs after recoveries.",
+            "This shows which customer segment is hurting portfolio credit performance the most from a loss perspective.",
+        )
+
     col3, col4 = st.columns(2)
-    
+
     with col3:
-        # Chart 11: Utilization Rate by Behavioral Type (%)
-        util_comparison = df.groupby('behavioral_type')['utilization_rate'].mean().reset_index()
-        
+        el_by_segment = df.groupby("income_segment", as_index=False)["expected_loss_b"].sum()
+        el_by_segment["expected_loss_b"] = el_by_segment["expected_loss_b"] / 1e6
+
+        fig = px.pie(
+            el_by_segment,
+            values="expected_loss_b",
+            names="income_segment",
+            title="Expected Loss Distribution by Income Segment",
+            color_discrete_sequence=px.colors.sequential.YlOrRd,
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+        fig.update_traces(textposition="inside", textinfo="percent+label")
+
+        render_chart_with_explainer(
+            fig,
+            "Expected loss by segment explanation",
+            "Income segments shown as shares of total expected loss.",
+            "Each slice is expected loss in millions of dollars.",
+            "Bigger slices mean that segment contributes more to expected loss across the portfolio.",
+            "This chart shows where economic credit loss is concentrated, not just where exposure is concentrated.",
+        )
+
+    with col4:
+        sample = df.sample(min(10000, len(df)), random_state=42) if len(df) > 0 else df
+        fig = px.scatter(
+            sample,
+            x="fico_score",
+            y="pd",
+            color="behavioral_type",
+            title="FICO Score vs Probability of Default (PD)",
+            labels={"fico_score": "FICO Score", "pd": "PD (%)"},
+            opacity=0.6,
+            color_discrete_map={"Transactor": "#1B3B6F", "Revolver": "#D4AF37"},
+        )
+        fig.update_layout(title_font_color="#1B3B6F", yaxis_tickformat=".1%")
+
+        render_chart_with_explainer(
+            fig,
+            "FICO vs PD scatter explanation",
+            "Individual account FICO score.",
+            "Individual account probability of default.",
+            "Points further left and higher up are weaker-quality accounts. Patterns by color show whether transactors and revolvers behave differently.",
+            "This chart helps validate the risk relationship between score quality and default risk, while also showing behavior-type clustering.",
+        )
+
+
+def plot_exposure_analysis(df):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        exposure_comp = pd.DataFrame(
+            {
+                "Exposure Type": ["On-Balance (Drawn)", "Off-Balance (Unused × 10% CCF)"],
+                "Amount ($B)": [
+                    df["on_balance_exposure_b"].sum() / 1e9,
+                    df["off_balance_exposure_b"].sum() / 1e9,
+                ],
+            }
+        )
+
+        fig = px.bar(
+            exposure_comp,
+            x="Exposure Type",
+            y="Amount ($B)",
+            title="On-Balance vs Off-Balance Exposure Components",
+            color="Exposure Type",
+            color_discrete_map={
+                "On-Balance (Drawn)": "#1B3B6F",
+                "Off-Balance (Unused × 10% CCF)": "#4A90E2",
+            },
+        )
+        fig.update_layout(title_font_color="#1B3B6F", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "On-balance vs off-balance explanation",
+            "Two exposure components: drawn balances and unused commitments converted with CCF.",
+            "Exposure amount in billions of dollars.",
+            "This compares what customers already owe versus what could still become exposure through undrawn limits.",
+            "This is important because Basel RWA for cards is not only about balances already drawn; unused lines also contribute through CCF.",
+        )
+
+    with col2:
+        fig = px.box(
+            df,
+            x="income_segment",
+            y="credit_limit",
+            title="Credit Limit Distribution by Income Segment",
+            labels={"credit_limit": "Credit Limit ($)", "income_segment": "Income Segment"},
+            color="income_segment",
+        )
+        fig.update_layout(title_font_color="#1B3B6F", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "Credit limit distribution explanation",
+            "Income segments.",
+            "Assigned credit limits in dollars.",
+            "Higher boxes and medians mean that segment carries larger granted limits. Wide boxes mean greater variation in line assignment.",
+            "This shows line allocation policy across the portfolio and highlights where limit optimization headroom may exist.",
+        )
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        util_comparison = df.groupby("behavioral_type", as_index=False)["utilization_rate"].mean()
         fig = px.bar(
             util_comparison,
-            x='behavioral_type',
-            y='utilization_rate',
-            title='Average Utilization Rate by Behavioral Type',
-            labels={'utilization_rate': 'Avg Utilization Rate (%)', 'behavioral_type': 'Behavioral Type'},
-            color='behavioral_type',
-            color_discrete_map={'Transactor': '#1B3B6F', 'Revolver': '#D4AF37'}
+            x="behavioral_type",
+            y="utilization_rate",
+            title="Average Utilization Rate by Behavioral Type",
+            labels={"utilization_rate": "Avg Utilization Rate (%)", "behavioral_type": "Behavioral Type"},
+            color="behavioral_type",
+            color_discrete_map={"Transactor": "#1B3B6F", "Revolver": "#D4AF37"},
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_tickformat='.1%',
-            yaxis_title='Average Utilization Rate (%)',
-            xaxis_title='Behavioral Type',
-            showlegend=False
+        fig.update_layout(title_font_color="#1B3B6F", yaxis_tickformat=".1%", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "Average utilization by behavior explanation",
+            "Behavioral type groups.",
+            "Average utilization percentage.",
+            "Higher bars mean that group uses more of its available limit on average.",
+            "This highlights why revolvers usually drive more exposure pressure and why low-utilization transactors are attractive for line optimization.",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+
     with col4:
-        # Chart 12: Outstanding Balance by Card Type ($M)
-        balance_by_type = df.groupby('card_type')['cc_outstanding_b'].sum().reset_index()
-        balance_by_type['cc_outstanding_b'] = balance_by_type['cc_outstanding_b'] / 1e6
-        
+        balance_by_type = df.groupby("card_type", as_index=False)["cc_outstanding_b"].sum()
+        balance_by_type["cc_outstanding_b"] = balance_by_type["cc_outstanding_b"] / 1e6
+
         fig = px.bar(
             balance_by_type,
-            x='card_type',
-            y='cc_outstanding_b',
-            title='Total Outstanding Balance by Card Type',
-            labels={'cc_outstanding_b': 'Outstanding Balance ($M)', 'card_type': 'Card Type'},
-            color='cc_outstanding_b',
-            color_continuous_scale='Greens'
+            x="card_type",
+            y="cc_outstanding_b",
+            title="Outstanding Balance by Card Type",
+            labels={"cc_outstanding_b": "Outstanding Balance ($M)", "card_type": "Card Type"},
+            color="cc_outstanding_b",
+            color_continuous_scale="Greens",
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_title='Outstanding Balance ($M)',
-            xaxis_title='Card Type'
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "Outstanding balance by card type explanation",
+            "Card product types such as Standard, Cash Back, Rewards, and Premium.",
+            "Total outstanding balance in millions of dollars.",
+            "Taller bars mean that product type carries more drawn exposure today.",
+            "This shows which products are driving actual balances and can support product-level pricing or capital strategy discussions.",
         )
-        st.plotly_chart(fig, use_container_width=True)
+
 
 def plot_capital_requirements(df):
-    """Capital & Regulatory Analysis Charts"""
-    
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Chart 13: Tier 1 Capital Requirement by Income Segment ($M)
-        t1_by_segment = df.groupby('income_segment')['tier1_requirement_b'].sum().reset_index()
-        t1_by_segment['tier1_requirement_b'] = t1_by_segment['tier1_requirement_b'] / 1e6
-        
+        t1_by_segment = df.groupby("income_segment", as_index=False)["tier1_requirement_b"].sum()
+        t1_by_segment["tier1_requirement_b"] = t1_by_segment["tier1_requirement_b"] / 1e6
+
         fig = px.bar(
             t1_by_segment,
-            x='income_segment',
-            y='tier1_requirement_b',
-            title='Tier 1 Capital Requirement by Income Segment',
-            labels={'tier1_requirement_b': 'Tier 1 Capital Req ($M)', 'income_segment': 'Income Segment'},
-            color='tier1_requirement_b',
-            color_continuous_scale='Blues'
+            x="income_segment",
+            y="tier1_requirement_b",
+            title="Tier 1 Capital Requirement by Income Segment",
+            labels={"tier1_requirement_b": "Tier 1 Capital Req ($M)", "income_segment": "Income Segment"},
+            color="tier1_requirement_b",
+            color_continuous_scale="Blues",
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_title='Tier 1 Capital Required ($M)',
-            xaxis_title='Income Segment'
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "Tier 1 capital by segment explanation",
+            "Income segments.",
+            "Tier 1 capital requirement in millions of dollars.",
+            "Taller bars mean that segment needs more capital support under the modeled framework.",
+            "This translates exposure and RWA into a more finance-friendly capital requirement view.",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+
     with col2:
-        # Chart 14: RWA Composition - Transactor vs Revolver ($B)
-        rwa_composition = pd.DataFrame({
-            'Type': ['Transactor RWA', 'Revolver RWA'],
-            'RWA ($B)': [
-                df['transactor_rwa_b'].sum() / 1e9,
-                df['revolver_rwa_b'].sum() / 1e9
-            ]
-        })
-        
+        rwa_composition = pd.DataFrame(
+            {
+                "Type": ["Transactor RWA", "Revolver RWA"],
+                "RWA ($B)": [
+                    df["transactor_rwa_b"].sum() / 1e9,
+                    df["revolver_rwa_b"].sum() / 1e9,
+                ],
+            }
+        )
+
         fig = px.pie(
             rwa_composition,
-            values='RWA ($B)',
-            names='Type',
-            title='RWA Composition: Transactor vs Revolver',
-            color='Type',
-            color_discrete_map={'Transactor RWA': '#1B3B6F', 'Revolver RWA': '#D4AF37'}
+            values="RWA ($B)",
+            names="Type",
+            title="RWA Composition: Transactor vs Revolver",
+            color="Type",
+            color_discrete_map={"Transactor RWA": "#1B3B6F", "Revolver RWA": "#D4AF37"},
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
+        fig.update_layout(title_font_color="#1B3B6F")
+        fig.update_traces(textposition="inside", textinfo="percent+value")
+
+        render_chart_with_explainer(
+            fig,
+            "RWA composition explanation",
+            "Behavior-based RWA buckets.",
+            "Share of total portfolio RWA.",
+            "A larger slice means that group contributes more to capital consumption.",
+            "This quickly shows whether capital pressure is coming more from revolvers or transactors.",
         )
-        fig.update_traces(textposition='inside', textinfo='percent+value')
-        st.plotly_chart(fig, use_container_width=True)
+
 
 def plot_profitability_analysis(df):
-    """Profitability & Performance Charts"""
-    
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Chart 15: Revenue Components by Income Segment ($M)
-        revenue_components = df.groupby('income_segment').agg({
-            'interest_income_b': 'sum',
-            'fee_income_b': 'sum'
-        }).reset_index()
-        
-        revenue_components['interest_income_b'] = revenue_components['interest_income_b'] / 1e6
-        revenue_components['fee_income_b'] = revenue_components['fee_income_b'] / 1e6
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Interest Income', x=revenue_components['income_segment'], 
-                   y=revenue_components['interest_income_b'], marker_color='#1B3B6F'),
-            go.Bar(name='Fee Income', x=revenue_components['income_segment'], 
-                   y=revenue_components['fee_income_b'], marker_color='#D4AF37')
-        ])
-        
-        fig.update_layout(
-            title='Revenue Components by Income Segment',
-            barmode='stack',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='Revenue ($M)',
-            legend_title='Revenue Type'
+        revenue_components = (
+            df.groupby("income_segment", as_index=False)[["interest_income_b", "fee_income_b"]].sum()
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        revenue_components["interest_income_b"] = revenue_components["interest_income_b"] / 1e6
+        revenue_components["fee_income_b"] = revenue_components["fee_income_b"] / 1e6
+
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    name="Interest Income",
+                    x=revenue_components["income_segment"],
+                    y=revenue_components["interest_income_b"],
+                    marker_color="#1B3B6F",
+                ),
+                go.Bar(
+                    name="Fee Income",
+                    x=revenue_components["income_segment"],
+                    y=revenue_components["fee_income_b"],
+                    marker_color="#D4AF37",
+                ),
+            ]
+        )
+        fig.update_layout(
+            title="Revenue Components by Income Segment",
+            barmode="stack",
+            xaxis_title="Income Segment",
+            yaxis_title="Revenue ($M)",
+            title_font_color="#1B3B6F",
+        )
+
+        render_chart_with_explainer(
+            fig,
+            "Revenue components explanation",
+            "Income segments.",
+            "Stacked revenue in millions of dollars split into interest income and fee income.",
+            "The total bar height is total revenue for that segment. The colors show what portion comes from interest versus fees.",
+            "This shows whether a segment is monetized mostly through revolving balances or through transaction-related fees.",
+        )
+
     with col2:
-        # Chart 16: Net Income by Behavioral Type ($M)
-        ni_by_type = df.groupby('behavioral_type')['net_income_b'].sum().reset_index()
-        ni_by_type['net_income_b'] = ni_by_type['net_income_b'] / 1e6
-        
+        ni_by_type = df.groupby("behavioral_type", as_index=False)["net_income_b"].sum()
+        ni_by_type["net_income_b"] = ni_by_type["net_income_b"] / 1e6
+
         fig = px.bar(
             ni_by_type,
-            x='behavioral_type',
-            y='net_income_b',
-            title='Net Income by Behavioral Type',
-            labels={'net_income_b': 'Net Income ($M)', 'behavioral_type': 'Behavioral Type'},
-            color='behavioral_type',
-            color_discrete_map={'Transactor': '#1B3B6F', 'Revolver': '#D4AF37'}
+            x="behavioral_type",
+            y="net_income_b",
+            title="Net Income by Behavioral Type",
+            labels={"net_income_b": "Net Income ($M)", "behavioral_type": "Behavioral Type"},
+            color="behavioral_type",
+            color_discrete_map={"Transactor": "#1B3B6F", "Revolver": "#D4AF37"},
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_title='Net Income ($M)',
-            xaxis_title='Behavioral Type',
-            showlegend=False
+        fig.update_layout(title_font_color="#1B3B6F", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "Net income by behavior explanation",
+            "Behavioral groups.",
+            "Net income in millions of dollars.",
+            "Higher bars mean that group contributes more profit after funding, operating costs, and expected loss.",
+            "This helps compare profitability against the capital and risk burden shown elsewhere in the dashboard.",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+
     col3, col4 = st.columns(2)
-    
+
     with col3:
-        # Chart 17: ROE by Income Segment (%)
-        roe_by_segment = df.groupby('income_segment')['roe'].mean().reset_index()
-        
+        roe_by_segment = df.groupby("income_segment", as_index=False)["roe"].mean()
         fig = px.bar(
             roe_by_segment,
-            x='income_segment',
-            y='roe',
-            title='Return on Equity (ROE) by Income Segment',
-            labels={'roe': 'ROE (%)', 'income_segment': 'Income Segment'},
-            color='roe',
-            color_continuous_scale='RdYlGn'
+            x="income_segment",
+            y="roe",
+            title="Return on Equity (ROE) by Income Segment",
+            labels={"roe": "ROE (%)", "income_segment": "Income Segment"},
+            color="roe",
+            color_continuous_scale="RdYlGn",
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_tickformat='.1%',
-            yaxis_title='Return on Equity (ROE) %',
-            xaxis_title='Income Segment'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col4:
-        # Chart 18: Expected Loss vs Net Income ($M)
-        comparison = df.groupby('income_segment').agg({
-            'expected_loss_b': 'sum',
-            'net_income_b': 'sum'
-        }).reset_index()
-        
-        comparison['expected_loss_b'] = comparison['expected_loss_b'] / 1e6
-        comparison['net_income_b'] = comparison['net_income_b'] / 1e6
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Expected Loss', x=comparison['income_segment'], 
-                   y=comparison['expected_loss_b'], marker_color='#E74C3C'),
-            go.Bar(name='Net Income', x=comparison['income_segment'], 
-                   y=comparison['net_income_b'], marker_color='#27AE60')
-        ])
-        
-        fig.update_layout(
-            title='Expected Loss vs Net Income by Segment',
-            barmode='group',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='Amount ($M)',
-            legend_title='Metric'
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(title_font_color="#1B3B6F", yaxis_tickformat=".1%")
 
-def plot_optimization_scenarios(df):
-    """RWA Optimization Pathway Analysis"""
-    
-    st.subheader("💡 RWA Optimization Pathways")
-    
-    # Pathway 1: Transactor Limit Reduction
-    st.markdown("### Pathway 1: Transactor Credit Limit Reduction")
-    
-    transactors = df[df['is_transactor'] == 1].copy()
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Chart 19: Limit Reduction Impact on RWA
-        reduction_scenarios = []
-        for reduction_pct in [0, 0.10, 0.20, 0.30, 0.40, 0.50]:
-            scenario_df = transactors.copy()
-            new_limit = scenario_df['credit_limit'] * (1 - reduction_pct)
-            new_unused = new_limit - scenario_df['cc_outstanding_b']
-            new_ead = scenario_df['cc_outstanding_b'] + new_unused * 0.10
-            new_rwa = new_ead * 1.0
-            
-            reduction_scenarios.append({
-                'Reduction %': f"{reduction_pct*100:.0f}%",
-                'Total RWA ($B)': new_rwa.sum() / 1e9,
-                'RWA Saved ($M)': (transactors['total_cc_rwa_b'].sum() - new_rwa.sum()) / 1e6
-            })
-        
-        scenario_df_plot = pd.DataFrame(reduction_scenarios)
-        
-        fig = px.line(
-            scenario_df_plot,
-            x='Reduction %',
-            y='RWA Saved ($M)',
-            title='Transactor Limit Reduction: RWA Savings',
-            markers=True,
-            line_shape='spline'
+        render_chart_with_explainer(
+            fig,
+            "ROE by segment explanation",
+            "Income segments.",
+            "Average return on equity percentage.",
+            "Higher bars mean better return generated relative to the capital tied to that segment.",
+            "This helps identify which segment is producing the best capital efficiency.",
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Credit Limit Reduction %',
-            yaxis_title='RWA Saved ($M)'
-        )
-        fig.update_traces(line_color='#1B3B6F', marker=dict(size=10, color='#D4AF37'))
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        # Chart 20: Capital Relief from Optimization
-        fig = px.bar(
-            scenario_df_plot,
-            x='Reduction %',
-            y='RWA Saved ($M)',
-            title='Tier 1 Capital Relief Opportunity',
-            labels={'RWA Saved ($M)': 'Capital Relief ($M)'},
-            color='RWA Saved ($M)',
-            color_continuous_scale='Greens'
-        )
-        
-        # Add T1 capital line
-        scenario_df_plot['T1 Capital Relief ($M)'] = scenario_df_plot['RWA Saved ($M)'] * 0.085
-        
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Credit Limit Reduction %',
-            yaxis_title='Capital Relief ($M)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Pathway 2: Segment Performance Analysis
-    st.markdown("### Pathway 2: Income Segment Optimization")
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        # Chart 21: RWA Efficiency by Segment (Revenue per $ RWA)
-        segment_efficiency = df.groupby('income_segment').agg({
-            'total_revenue_b': 'sum',
-            'total_cc_rwa_b': 'sum'
-        })
-        segment_efficiency['revenue_per_rwa'] = (
-            segment_efficiency['total_revenue_b'] / segment_efficiency['total_cc_rwa_b']
-        ).round(4)
-        
-        fig = px.bar(
-            segment_efficiency.reset_index(),
-            x='income_segment',
-            y='revenue_per_rwa',
-            title='Revenue Efficiency: Revenue per $ of RWA',
-            labels={'revenue_per_rwa': 'Revenue per $ RWA', 'income_segment': 'Income Segment'},
-            color='revenue_per_rwa',
-            color_continuous_scale='Viridis'
-        )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='Revenue per $ RWA'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
+
     with col4:
-        # Chart 22: Optimization Eligibility (Accounts)
-        optimization_stats = pd.DataFrame({
-            'Category': [
-                'Eligible for\nLimit Reduction',
-                'Eligible for\nOverdraft Conversion',
-                'All Other\nAccounts'
-            ],
-            'Accounts': [
-                df['eligible_for_limit_reduction'].sum(),
-                df['eligible_for_overdraft_conversion'].sum(),
-                len(df) - df['eligible_for_limit_reduction'].sum()
+        comparison = df.groupby("income_segment", as_index=False)[["expected_loss_b", "net_income_b"]].sum()
+        comparison["expected_loss_b"] = comparison["expected_loss_b"] / 1e6
+        comparison["net_income_b"] = comparison["net_income_b"] / 1e6
+
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    name="Expected Loss",
+                    x=comparison["income_segment"],
+                    y=comparison["expected_loss_b"],
+                    marker_color="#E74C3C",
+                ),
+                go.Bar(
+                    name="Net Income",
+                    x=comparison["income_segment"],
+                    y=comparison["net_income_b"],
+                    marker_color="#27AE60",
+                ),
             ]
-        })
-        
+        )
+        fig.update_layout(
+            title="Expected Loss vs Net Income by Segment",
+            barmode="group",
+            xaxis_title="Income Segment",
+            yaxis_title="Amount ($M)",
+            title_font_color="#1B3B6F",
+        )
+
+        render_chart_with_explainer(
+            fig,
+            "Expected loss vs net income explanation",
+            "Income segments.",
+            "Amount in millions of dollars for both expected loss and net income.",
+            "If the green bar is much larger than the red bar, that segment is earning well above its modeled loss burden. If red begins to catch up, economics are weaker.",
+            "This chart compares the good news and bad news for each segment in one view.",
+        )
+
+
+def plot_optimization_scenarios(df, rwa_reduction):
+    st.subheader("💡 RWA Optimization Pathways")
+
+    transactors = df[df["is_transactor"] == 1].copy()
+
+    st.markdown("### Pathway 1: Transactor Credit Limit Reduction")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        reduction_scenarios = []
+        base_transactor_rwa = transactors["total_cc_rwa_b"].sum() if len(transactors) > 0 else 0
+
+        for reduction_pct in [0, 0.10, 0.20, 0.30, 0.40, 0.50]:
+            if len(transactors) > 0:
+                new_limit = transactors["credit_limit"] * (1 - reduction_pct)
+                new_unused = (new_limit - transactors["cc_outstanding_b"]).clip(lower=0)
+                new_ead = transactors["cc_outstanding_b"] + new_unused * 0.10
+                new_rwa = new_ead * 1.0
+                rwa_saved = base_transactor_rwa - new_rwa.sum()
+            else:
+                rwa_saved = 0
+
+            reduction_scenarios.append(
+                {
+                    "Reduction %": f"{int(reduction_pct * 100)}%",
+                    "RWA Saved ($M)": rwa_saved / 1e6,
+                }
+            )
+
+        scenario_df = pd.DataFrame(reduction_scenarios)
+
+        fig = px.line(
+            scenario_df,
+            x="Reduction %",
+            y="RWA Saved ($M)",
+            title="Transactor Limit Reduction: RWA Savings",
+            markers=True,
+            line_shape="spline",
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "Transactor limit reduction savings explanation",
+            "Credit limit reduction scenarios from 0% to 50%.",
+            "RWA saved in millions of dollars.",
+            "The line climbs as more unused limits are reduced, which lowers off-balance EAD and therefore RWA.",
+            "This shows the size of the optimization opportunity if low-utilization transactors are managed more tightly.",
+        )
+
+    with col2:
+        scenario_df["T1 Capital Relief ($M)"] = scenario_df["RWA Saved ($M)"] * 0.085
+        fig = px.bar(
+            scenario_df,
+            x="Reduction %",
+            y="T1 Capital Relief ($M)",
+            title="Tier 1 Capital Relief from Limit Reduction",
+            color="T1 Capital Relief ($M)",
+            color_continuous_scale="Greens",
+        )
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "Tier 1 relief explanation",
+            "Credit limit reduction scenarios.",
+            "Tier 1 capital relief in millions of dollars.",
+            "Higher bars mean more capital released from the optimization scenario.",
+            "This converts RWA savings into a capital story that finance and senior management can act on.",
+        )
+
+    st.markdown("### Pathway 2: Final RWA vs Current RWA")
+    col3, col4 = st.columns(2)
+
+    with col3:
+        compare_df = pd.DataFrame(
+            {
+                "Scenario": ["Current RWA", "Final / Target RWA"],
+                "RWA ($M)": [
+                    rwa_reduction["current_rwa"] / 1e6,
+                    rwa_reduction["final_rwa"] / 1e6,
+                ],
+            }
+        )
+        fig = px.bar(
+            compare_df,
+            x="Scenario",
+            y="RWA ($M)",
+            title="Current RWA vs Target / Final RWA",
+            color="Scenario",
+            color_discrete_map={
+                "Current RWA": "#1B3B6F",
+                "Final / Target RWA": "#27AE60",
+            },
+        )
+        fig.update_layout(title_font_color="#1B3B6F", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "Current vs target RWA explanation",
+            "Current portfolio and optimized target portfolio.",
+            "RWA in millions of dollars.",
+            "The green bar should be lower if the optimization works. The size of the drop is the value created.",
+            "This is the clean target-setting chart for project discussions and executive updates.",
+        )
+
+    with col4:
+        optimization_stats = pd.DataFrame(
+            {
+                "Category": [
+                    "Eligible for Limit Reduction",
+                    "Eligible for Overdraft Conversion",
+                    "All Other Accounts",
+                ],
+                "Accounts": [
+                    int(df["eligible_for_limit_reduction"].sum()),
+                    int(df["eligible_for_overdraft_conversion"].sum()),
+                    int(len(df) - df["eligible_for_limit_reduction"].sum()),
+                ],
+            }
+        )
+
         fig = px.pie(
             optimization_stats,
-            values='Accounts',
-            names='Category',
-            title='RWA Optimization Eligibility',
-            color_discrete_sequence=['#1B3B6F', '#D4AF37', '#9CA3AF']
+            values="Accounts",
+            names="Category",
+            title="Optimization Eligibility",
+            color_discrete_sequence=["#1B3B6F", "#D4AF37", "#9CA3AF"],
         )
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
+        fig.update_layout(title_font_color="#1B3B6F")
+        fig.update_traces(textposition="inside", textinfo="percent+label")
+
+        render_chart_with_explainer(
+            fig,
+            "Optimization eligibility explanation",
+            "Portfolio split across optimization-eligible and non-eligible groups.",
+            "Each slice shows account count share.",
+            "Bigger eligible slices mean more room to act without touching the full portfolio.",
+            "This tells you how much of the book is immediately actionable under the modeled strategy.",
         )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
+
 
 def plot_rwa_reduction_analysis(df):
-    """Comprehensive RWA Reduction Analysis Charts"""
-    
-    st.header("📉 RWA Reduction Analysis - Multi-Level Breakdown")
-    
-    # Calculate baseline and optimized scenarios
-    baseline_rwa = df['total_cc_rwa_b'].sum()
-    
-    # Scenario: 30% transactor limit reduction
-    transactors = df[df['is_transactor'] == 1].copy()
+    baseline_rwa = df["total_cc_rwa_b"].sum()
+
+    transactors = df[df["is_transactor"] == 1].copy()
     reduction_pct = 0.30
-    
-    trans_new_limit = transactors['credit_limit'] * (1 - reduction_pct)
-    trans_new_unused = (trans_new_limit - transactors['cc_outstanding_b']).clip(lower=0)
-    trans_new_ead = transactors['cc_outstanding_b'] + trans_new_unused * 0.10
-    trans_new_rwa = trans_new_ead * 1.0
-    
-    transactors['rwa_optimized'] = trans_new_rwa
-    transactors['rwa_reduction'] = transactors['total_cc_rwa_b'] - trans_new_rwa
-    
-    # Revolvers unchanged
-    revolvers = df[df['is_revolver'] == 1].copy()
-    revolvers['rwa_optimized'] = revolvers['total_cc_rwa_b']
-    revolvers['rwa_reduction'] = 0
-    
-    # Combined optimized portfolio
-    df_optimized = pd.concat([transactors, revolvers])
-    
-    # Chart Set 1: Overall RWA Reduction
-    st.subheader("1️⃣ Overall Portfolio RWA Reduction")
-    
+
+    if len(transactors) > 0:
+        trans_new_limit = transactors["credit_limit"] * (1 - reduction_pct)
+        trans_new_unused = (trans_new_limit - transactors["cc_outstanding_b"]).clip(lower=0)
+        trans_new_ead = transactors["cc_outstanding_b"] + trans_new_unused * 0.10
+        trans_new_rwa = trans_new_ead * 1.0
+        transactors["rwa_optimized"] = trans_new_rwa
+        transactors["rwa_reduction"] = transactors["total_cc_rwa_b"] - trans_new_rwa
+    else:
+        transactors["rwa_optimized"] = []
+        transactors["rwa_reduction"] = []
+
+    revolvers = df[df["is_revolver"] == 1].copy()
+    revolvers["rwa_optimized"] = revolvers["total_cc_rwa_b"]
+    revolvers["rwa_reduction"] = 0.0
+
+    df_opt = pd.concat([transactors, revolvers], ignore_index=True)
+
+    st.subheader("RWA Reduction Breakdown")
     col1, col2 = st.columns(2)
-    
+
     with col1:
-        # Chart 1A: Total RWA - Before vs After
-        total_comparison = pd.DataFrame({
-            'Scenario': ['Current RWA', 'Post-Optimization RWA', 'RWA Reduction'],
-            'Amount ($M)': [
-                baseline_rwa / 1e6,
-                df_optimized['rwa_optimized'].sum() / 1e6,
-                (baseline_rwa - df_optimized['rwa_optimized'].sum()) / 1e6
-            ]
-        })
-        
-        fig = go.Figure(data=[
-            go.Bar(
-                x=total_comparison['Scenario'],
-                y=total_comparison['Amount ($M)'],
-                text=total_comparison['Amount ($M)'].round(1),
-                textposition='outside',
-                marker_color=['#1B3B6F', '#4A90E2', '#27AE60']
-            )
-        ])
-        
-        fig.update_layout(
-            title='Total RWA: Current vs Post-Optimization',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Scenario',
-            yaxis_title='RWA ($M)',
-            showlegend=False
+        total_comparison = pd.DataFrame(
+            {
+                "Scenario": ["Current RWA", "Post-Optimization RWA", "RWA Reduction"],
+                "Amount ($M)": [
+                    baseline_rwa / 1e6,
+                    df_opt["rwa_optimized"].sum() / 1e6,
+                    (baseline_rwa - df_opt["rwa_optimized"].sum()) / 1e6,
+                ],
+            }
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
+        fig = px.bar(
+            total_comparison,
+            x="Scenario",
+            y="Amount ($M)",
+            title="Total RWA: Before vs After",
+            text="Amount ($M)",
+            color="Scenario",
+            color_discrete_map={
+                "Current RWA": "#1B3B6F",
+                "Post-Optimization RWA": "#4A90E2",
+                "RWA Reduction": "#27AE60",
+            },
+        )
+        fig.update_traces(texttemplate="$%{text:.1f}M", textposition="outside")
+        fig.update_layout(title_font_color="#1B3B6F", showlegend=False)
+
+        render_chart_with_explainer(
+            fig,
+            "Before vs after RWA explanation",
+            "Portfolio state before optimization, after optimization, and the difference.",
+            "RWA in millions of dollars.",
+            "This is a direct before-and-after capital view.",
+            "It shows whether the proposed optimization makes a meaningful difference at total portfolio level.",
+        )
+
     with col2:
-        # Chart 1B: RWA Reduction Waterfall
-        waterfall_values = [
-            baseline_rwa / 1e6,
-            -(baseline_rwa - df_optimized['rwa_optimized'].sum()) / 1e6,
-            df_optimized['rwa_optimized'].sum() / 1e6
-        ]
-        
-        fig = go.Figure(go.Waterfall(
-            x=['Current RWA', 'Transactor\nOptimization', 'Post-Opt RWA'],
-            y=waterfall_values,
-            measure=['absolute', 'relative', 'total'],
-            text=[f"${abs(v):.1f}M" for v in waterfall_values],
-            textposition='outside',
-            connector={'line': {'color': '#6B7280'}},
-            decreasing={'marker': {'color': '#27AE60'}},
-            increasing={'marker': {'color': '#E74C3C'}},
-            totals={'marker': {'color': '#1B3B6F'}}
-        ))
-        
-        fig.update_layout(
-            title='RWA Reduction Waterfall',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            yaxis_title='RWA ($M)',
-            showlegend=False
+        segment_reduction = (
+            df_opt.groupby("income_segment", as_index=False)[["total_cc_rwa_b", "rwa_optimized"]].sum()
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Chart Set 2: RWA Reduction by Income Segment
-    st.subheader("2️⃣ RWA Reduction by Income Segment")
-    
-    col3, col4 = st.columns(2)
-    
-    with col3:
-        # Chart 2A: RWA Reduction Amount by Segment
-        segment_reduction = df_optimized.groupby('income_segment').agg({
-            'total_cc_rwa_b': 'sum',
-            'rwa_optimized': 'sum',
-            'rwa_reduction': 'sum'
-        }).reset_index()
-        
-        segment_reduction['total_cc_rwa_b'] = segment_reduction['total_cc_rwa_b'] / 1e6
-        segment_reduction['rwa_optimized'] = segment_reduction['rwa_optimized'] / 1e6
-        segment_reduction['rwa_reduction'] = segment_reduction['rwa_reduction'] / 1e6
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Current RWA', x=segment_reduction['income_segment'], 
-                   y=segment_reduction['total_cc_rwa_b'], marker_color='#1B3B6F'),
-            go.Bar(name='Post-Optimization RWA', x=segment_reduction['income_segment'], 
-                   y=segment_reduction['rwa_optimized'], marker_color='#4A90E2')
-        ])
-        
-        fig.update_layout(
-            title='RWA by Income Segment: Before vs After',
-            barmode='group',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='RWA ($M)',
-            legend_title='Scenario'
+        segment_reduction["reduction_pct"] = np.where(
+            segment_reduction["total_cc_rwa_b"] > 0,
+            (segment_reduction["total_cc_rwa_b"] - segment_reduction["rwa_optimized"])
+            / segment_reduction["total_cc_rwa_b"]
+            * 100,
+            0,
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col4:
-        # Chart 2B: RWA Reduction % by Segment
-        segment_reduction['reduction_pct'] = (
-            segment_reduction['rwa_reduction'] / segment_reduction['total_cc_rwa_b'] * 100
-        )
-        
+
         fig = px.bar(
             segment_reduction,
-            x='income_segment',
-            y='reduction_pct',
-            title='RWA Reduction % by Income Segment',
-            labels={'reduction_pct': 'RWA Reduction (%)', 'income_segment': 'Income Segment'},
-            color='reduction_pct',
-            color_continuous_scale='Greens',
-            text='reduction_pct'
+            x="income_segment",
+            y="reduction_pct",
+            title="RWA Reduction % by Income Segment",
+            labels={"reduction_pct": "Reduction (%)", "income_segment": "Income Segment"},
+            color="reduction_pct",
+            color_continuous_scale="Greens",
+            text="reduction_pct",
         )
-        
-        fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+        fig.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
+        fig.update_layout(title_font_color="#1B3B6F")
+
+        render_chart_with_explainer(
+            fig,
+            "Reduction by income segment explanation",
+            "Income segments.",
+            "Percentage reduction in RWA after optimization.",
+            "Higher bars mean that segment benefits more from the modeled optimization path.",
+            "This tells you where the optimization is most powerful, not just where the biggest balances sit.",
+        )
+
+    col3, col4 = st.columns(2)
+
+    with col3:
+        behavioral_reduction = (
+            df_opt.groupby("behavioral_type", as_index=False)[["total_cc_rwa_b", "rwa_reduction"]].sum()
+        )
+        behavioral_reduction["total_cc_rwa_b"] = behavioral_reduction["total_cc_rwa_b"] / 1e6
+        behavioral_reduction["rwa_reduction"] = behavioral_reduction["rwa_reduction"] / 1e6
+
+        fig = go.Figure(
+            data=[
+                go.Bar(
+                    name="Current RWA",
+                    x=behavioral_reduction["behavioral_type"],
+                    y=behavioral_reduction["total_cc_rwa_b"],
+                    marker_color="#1B3B6F",
+                ),
+                go.Bar(
+                    name="RWA Reduction",
+                    x=behavioral_reduction["behavioral_type"],
+                    y=behavioral_reduction["rwa_reduction"],
+                    marker_color="#27AE60",
+                ),
+            ]
+        )
         fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='RWA Reduction (%)'
+            title="RWA Reduction Amount by Behavioral Type",
+            barmode="group",
+            yaxis_title="Amount ($M)",
+            title_font_color="#1B3B6F",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Chart Set 3: RWA Reduction by Behavioral Type
-    st.subheader("3️⃣ RWA Reduction by Behavioral Type")
-    
-    col5, col6 = st.columns(2)
-    
-    with col5:
-        # Chart 3A: RWA Reduction by Behavioral Type
-        behavioral_reduction = df_optimized.groupby('behavioral_type').agg({
-            'total_cc_rwa_b': 'sum',
-            'rwa_optimized': 'sum',
-            'rwa_reduction': 'sum'
-        }).reset_index()
-        
-        behavioral_reduction['total_cc_rwa_b'] = behavioral_reduction['total_cc_rwa_b'] / 1e6
-        behavioral_reduction['rwa_optimized'] = behavioral_reduction['rwa_optimized'] / 1e6
-        behavioral_reduction['rwa_reduction'] = behavioral_reduction['rwa_reduction'] / 1e6
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Current RWA', x=behavioral_reduction['behavioral_type'], 
-                   y=behavioral_reduction['total_cc_rwa_b'], marker_color='#1B3B6F'),
-            go.Bar(name='RWA Reduction', x=behavioral_reduction['behavioral_type'], 
-                   y=behavioral_reduction['rwa_reduction'], marker_color='#27AE60')
-        ])
-        
-        fig.update_layout(
-            title='RWA Reduction Amount by Behavioral Type',
-            barmode='group',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Behavioral Type',
-            yaxis_title='RWA ($M)',
-            legend_title='Metric'
+
+        render_chart_with_explainer(
+            fig,
+            "Behavioral reduction explanation",
+            "Behavioral groups.",
+            "Current RWA and RWA reduction in millions of dollars.",
+            "This compares how much burden each group has today and how much can actually be removed.",
+            "It helps prove whether transactor optimization is the real driver of savings.",
         )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col6:
-        # Chart 3B: Contribution to Total RWA Reduction
-        behavioral_reduction['contribution_pct'] = (
-            behavioral_reduction['rwa_reduction'] / behavioral_reduction['rwa_reduction'].sum() * 100
+
+    with col4:
+        combo_reduction = (
+            df_opt.groupby(["income_segment", "behavioral_type"], as_index=False)["rwa_reduction"].sum()
         )
-        
-        fig = px.pie(
-            behavioral_reduction,
-            values='rwa_reduction',
-            names='behavioral_type',
-            title='Contribution to Total RWA Reduction',
-            color_discrete_map={'Transactor': '#1B3B6F', 'Revolver': '#D4AF37'}
-        )
-        
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
-        )
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Chart Set 4: RWA Reduction by FICO Tier
-    st.subheader("4️⃣ RWA Reduction by FICO Risk Tier")
-    
-    col7, col8 = st.columns(2)
-    
-    with col7:
-        # Chart 4A: RWA Reduction by FICO Tier
-        fico_reduction = df_optimized.groupby('fico_tier').agg({
-            'total_cc_rwa_b': 'sum',
-            'rwa_reduction': 'sum'
-        }).reset_index()
-        
-        fico_reduction['total_cc_rwa_b'] = fico_reduction['total_cc_rwa_b'] / 1e6
-        fico_reduction['rwa_reduction'] = fico_reduction['rwa_reduction'] / 1e6
-        fico_reduction['reduction_pct'] = (
-            fico_reduction['rwa_reduction'] / fico_reduction['total_cc_rwa_b'] * 100
-        )
-        
-        fig = px.bar(
-            fico_reduction,
-            x='fico_tier',
-            y='rwa_reduction',
-            title='RWA Reduction Amount by FICO Risk Tier',
-            labels={'rwa_reduction': 'RWA Reduction ($M)', 'fico_tier': 'FICO Risk Tier'},
-            color='rwa_reduction',
-            color_continuous_scale='Blues',
-            text='rwa_reduction'
-        )
-        
-        fig.update_traces(texttemplate='$%{text:.1f}M', textposition='outside')
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='FICO Risk Tier',
-            yaxis_title='RWA Reduction ($M)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col8:
-        # Chart 4B: RWA Reduction % by FICO Tier
-        fig = px.line(
-            fico_reduction,
-            x='fico_tier',
-            y='reduction_pct',
-            title='RWA Reduction % by FICO Risk Tier',
-            labels={'reduction_pct': 'RWA Reduction (%)', 'fico_tier': 'FICO Risk Tier'},
-            markers=True,
-            line_shape='spline'
-        )
-        
-        fig.update_traces(line_color='#1B3B6F', marker=dict(size=12, color='#D4AF37'))
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='FICO Risk Tier',
-            yaxis_title='RWA Reduction (%)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Chart Set 5: RWA Reduction by Region
-    st.subheader("5️⃣ RWA Reduction by Geographic Region")
-    
-    col9, col10 = st.columns(2)
-    
-    with col9:
-        # Chart 5A: RWA Reduction by Region
-        region_reduction = df_optimized.groupby('region').agg({
-            'total_cc_rwa_b': 'sum',
-            'rwa_reduction': 'sum'
-        }).reset_index()
-        
-        region_reduction['total_cc_rwa_b'] = region_reduction['total_cc_rwa_b'] / 1e6
-        region_reduction['rwa_reduction'] = region_reduction['rwa_reduction'] / 1e6
-        
-        fig = go.Figure(data=[
-            go.Bar(name='Current RWA', x=region_reduction['region'], 
-                   y=region_reduction['total_cc_rwa_b'], marker_color='#1B3B6F', opacity=0.7),
-            go.Bar(name='RWA Reduction', x=region_reduction['region'], 
-                   y=region_reduction['rwa_reduction'], marker_color='#27AE60')
-        ])
-        
-        fig.update_layout(
-            title='RWA Reduction by Geographic Region',
-            barmode='group',
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Region',
-            yaxis_title='RWA ($M)',
-            legend_title='Metric'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col10:
-        # Chart 5B: Regional Contribution to RWA Reduction
-        region_reduction['contribution_pct'] = (
-            region_reduction['rwa_reduction'] / region_reduction['rwa_reduction'].sum() * 100
-        )
-        
-        fig = px.bar(
-            region_reduction.sort_values('contribution_pct', ascending=False),
-            x='region',
-            y='contribution_pct',
-            title='Regional Contribution to Total RWA Reduction',
-            labels={'contribution_pct': 'Contribution (%)', 'region': 'Region'},
-            color='contribution_pct',
-            color_continuous_scale='Viridis',
-            text='contribution_pct'
-        )
-        
-        fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Region',
-            yaxis_title='Contribution to Total Reduction (%)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Chart Set 6: Capital Relief Analysis
-    st.subheader("6️⃣ Tier 1 Capital Relief Analysis")
-    
-    col11, col12 = st.columns(2)
-    
-    with col11:
-        # Chart 6A: Capital Relief by Segment
-        segment_capital_relief = segment_reduction.copy()
-        segment_capital_relief['tier1_relief'] = segment_capital_relief['rwa_reduction'] * 0.085
-        
-        fig = px.bar(
-            segment_capital_relief,
-            x='income_segment',
-            y='tier1_relief',
-            title='Tier 1 Capital Relief by Income Segment',
-            labels={'tier1_relief': 'T1 Capital Relief ($M)', 'income_segment': 'Income Segment'},
-            color='tier1_relief',
-            color_continuous_scale='Greens',
-            text='tier1_relief'
-        )
-        
-        fig.update_traces(texttemplate='$%{text:.1f}M', textposition='outside')
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F',
-            xaxis_title='Income Segment',
-            yaxis_title='Tier 1 Capital Relief ($M)'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col12:
-        # Chart 6B: Combined Segment + Behavioral Analysis (Sunburst)
-        combo_reduction = df_optimized.groupby(['income_segment', 'behavioral_type']).agg({
-            'rwa_reduction': 'sum'
-        }).reset_index()
-        combo_reduction['rwa_reduction'] = combo_reduction['rwa_reduction'] / 1e6
-        
+        combo_reduction["rwa_reduction"] = combo_reduction["rwa_reduction"] / 1e6
+
         fig = px.sunburst(
             combo_reduction,
-            path=['income_segment', 'behavioral_type'],
-            values='rwa_reduction',
-            title='RWA Reduction: Income Segment → Behavioral Type',
-            color='rwa_reduction',
-            color_continuous_scale='Blues'
+            path=["income_segment", "behavioral_type"],
+            values="rwa_reduction",
+            title="RWA Reduction: Income Segment → Behavioral Type",
+            color="rwa_reduction",
+            color_continuous_scale="Blues",
         )
-        
-        fig.update_layout(
-            title_font_size=16,
-            title_font_color='#1B3B6F'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Summary Statistics
-    st.markdown("---")
-    st.subheader("📊 RWA Reduction Summary Statistics")
-    
-    summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
-    
-    total_reduction = (baseline_rwa - df_optimized['rwa_optimized'].sum()) / 1e6
-    reduction_pct = (total_reduction / (baseline_rwa / 1e6)) * 100
-    
-    with summary_col1:
-        st.metric("Total RWA Reduction", f"${total_reduction:.1f}M", f"-{reduction_pct:.1f}%")
-    
-    with summary_col2:
-        st.metric("Tier 1 Capital Relief", f"${total_reduction * 0.085:.1f}M", "8.5% of reduction")
-    
-    with summary_col3:
-        accounts_impacted = df_optimized[df_optimized['rwa_reduction'] > 0].shape[0]
-        st.metric("Accounts Impacted", f"{accounts_impacted:,}", f"{accounts_impacted/len(df)*100:.1f}% of portfolio")
-    
-    with summary_col4:
-        avg_reduction_per_account = total_reduction * 1e6 / max(accounts_impacted, 1)
-        st.metric("Avg RWA Reduction/Account", f"${avg_reduction_per_account:.0f}", "For impacted accounts")
+        fig.update_layout(title_font_color="#1B3B6F")
 
-# ============================================================================
-# MAIN DASHBOARD
-# ============================================================================
+        render_chart_with_explainer(
+            fig,
+            "Sunburst explanation",
+            "Inner ring is income segment; outer ring is behavioral type inside each segment.",
+            "Area size represents RWA reduction contribution.",
+            "Larger blocks mean that combination contributes more to the savings story.",
+            "This gives a manager a fast way to spot which segment-behavior mix is producing the optimization benefit.",
+        )
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
 
 def main():
-    """Main Profit Insight dashboard application"""
-    
-    # Header
-    st.markdown("""
-    <div style='text-align: center; padding: 20px 0;'>
-        <h1 style='font-size: 42px; color: #1B3B6F; margin: 0;'>
-            PROFIT INSIGHT BASEL RWA ANALYTICS
-        </h1>
-        <p style='font-size: 18px; color: #6B7280; margin: 10px 0;'>
-            PNC Bank Credit Card Portfolio | US Standardized Approach
-        </p>
-        <p style='font-size: 14px; color: #9CA3AF; margin: 5px 0;'>
-            Regulatory Capital & Risk-Weighted Asset Optimization Platform
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
+    st.markdown(
+        """
+        <div style='text-align: center; padding: 20px 0;'>
+            <h1 style='font-size: 42px; color: #1B3B6F; margin: 0;'>
+                PROFIT INSIGHT BASEL RWA ANALYTICS
+            </h1>
+            <p style='font-size: 18px; color: #6B7280; margin: 10px 0;'>
+                PNC Bank Credit Card Portfolio | US Standardized Approach
+            </p>
+            <p style='font-size: 14px; color: #9CA3AF; margin: 5px 0;'>
+                Regulatory Capital & Risk-Weighted Asset Optimization Platform
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
-    
-    # Load data
-    df = load_data()
-    
-    # Sidebar filters
+
+    df, data_msg = load_data()
+    st.success(f"✅ {data_msg}")
+
     filters = create_sidebar_filters(df)
-    
-    # Apply filters and stress
     df_filtered = apply_filters_and_stress(df, filters)
-    
-    # Stress mode indicator
-    if filters['stress_mode']:
+
+    if filters["stress_mode"]:
         st.warning(
-            f"📊 **Stress Scenario Active: {filters['scenario_type']}** | "
+            f"📊 Stress Scenario Active: {filters['scenario_type']} | "
             f"PD Stress: {filters['pd_stress']:.1f}x | "
             f"NCO Stress: {filters['nco_stress']:.1f}x | "
             f"GDP Impact: {filters['macro_stress']:.2f}x"
         )
-    
-    # Calculate RWA Reduction Potential
+
     rwa_reduction = calculate_rwa_reduction(df_filtered)
-    
-    # Key Performance Indicators
+
     st.subheader("📊 Portfolio Key Performance Indicators")
-    
+
     col1, col2, col3, col4, col5 = st.columns(5)
-    
+
+    baseline_rwa_full = df["total_cc_rwa_b"].sum()
+    current_rwa = rwa_reduction["current_rwa"]
+
     with col1:
-        st.metric(
-            "Total Accounts",
-            f"{len(df_filtered):,}",
-            f"{(len(df_filtered)/len(df)*100):.1f}% of portfolio"
-        )
-    
+        st.metric("Total Accounts", f"{len(df_filtered):,}")
+
     with col2:
-        total_ead = df_filtered['ead_b'].sum()
-        baseline_ead = df['ead_b'].sum()
-        st.metric(
-            "Total EAD",
-            format_currency(total_ead),
-            f"{((total_ead - baseline_ead)/baseline_ead*100):.1f}% vs base" if filters['stress_mode'] else None
-        )
-    
+        st.metric("Total EAD", format_currency(df_filtered["ead_b"].sum()))
+
     with col3:
-        total_rwa = df_filtered['total_cc_rwa_b'].sum()
-        baseline_rwa = df['total_cc_rwa_b'].sum()
-        st.metric(
-            "Total RWA",
-            format_currency(total_rwa),
-            f"{((total_rwa - baseline_rwa)/baseline_rwa*100):.1f}% vs base" if filters['stress_mode'] else None
+        stress_delta = (
+            f"{((current_rwa - baseline_rwa_full) / baseline_rwa_full * 100):.1f}% vs full book"
+            if baseline_rwa_full > 0
+            else None
         )
-    
+        st.metric("Current RWA", format_currency(current_rwa), stress_delta)
+
     with col4:
         st.metric(
             "RWA Reduction Potential",
-            format_currency(rwa_reduction['total_rwa_reduction']),
-            f"-{rwa_reduction['reduction_pct']:.1f}% achievable",
-            delta_color="inverse"
+            format_currency(rwa_reduction["total_rwa_reduction"]),
+            f"-{rwa_reduction['reduction_pct']:.1f}%",
+            delta_color="inverse",
         )
-    
+
     with col5:
         st.metric(
-            "T1 Capital Relief",
-            format_currency(rwa_reduction['tier1_relief']),
-            f"From RWA optimization",
-            delta_color="normal"
+            "Final RWA After Reduction",
+            format_currency(rwa_reduction["final_rwa"]),
+            f"Target after optimization",
+            delta_color="normal",
         )
-    
-    st.markdown("---")
-    
-    # Additional KPI Row - RWA Reduction Breakdown
+
     col6, col7, col8, col9, col10 = st.columns(5)
-    
+
     with col6:
-        st.metric(
-            "Current RWA Density",
-            "100.0%",
-            "US SA Fixed Rate"
-        )
-    
+        st.metric("Tier 1 Relief", format_currency(rwa_reduction["tier1_relief"]))
+
     with col7:
-        st.metric(
-            "Pathway 1: Transactor",
-            format_currency(rwa_reduction['transactor_pathway']),
-            "Limit Reduction (30%)"
-        )
-    
+        st.metric("Transactor Pathway", format_currency(rwa_reduction["transactor_pathway"]))
+
     with col8:
-        st.metric(
-            "Pathway 2: Overdraft",
-            format_currency(rwa_reduction['overdraft_pathway']),
-            "Conversion & Netting"
-        )
-    
+        st.metric("Overdraft Pathway", format_currency(rwa_reduction["overdraft_pathway"]))
+
     with col9:
-        eligible_pct = (df_filtered['eligible_for_limit_reduction'].sum() / len(df_filtered)) * 100
+        eligible_pct = (
+            df_filtered["eligible_for_limit_reduction"].sum() / len(df_filtered) * 100
+            if len(df_filtered) > 0
+            else 0
+        )
         st.metric(
             "Optimization Eligible",
-            f"{df_filtered['eligible_for_limit_reduction'].sum():,}",
-            f"{eligible_pct:.1f}% of portfolio"
+            f"{int(df_filtered['eligible_for_limit_reduction'].sum()):,}",
+            f"{eligible_pct:.1f}% of filtered book",
         )
-    
+
     with col10:
-        avg_pd = df_filtered['pd'].mean()
-        baseline_pd = df['pd_base'].mean()
-        st.metric(
-            "Avg PD",
-            format_percentage(avg_pd),
-            format_bps(avg_pd - baseline_pd) if filters['stress_mode'] else f"{avg_pd*10000:.0f} bps"
-        )
-    
+        avg_pd = df_filtered["pd"].mean() if len(df_filtered) > 0 else 0
+        st.metric("Avg PD", format_percentage(avg_pd), f"{avg_pd*10000:.0f} bps")
+
+    st.markdown(
+        """
+        <div class="chart-note">
+            The dashboard now explains every chart in plain language. Open each chart expander to see what the axes mean,
+            how to interpret the chart, and what business result it is showing.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown("---")
-    
-    # Tab Navigation
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-        "📊 Portfolio Overview",
-        "⚠️ Risk Analytics",
-        "💳 Exposure & Balances",
-        "🏛️ Capital Requirements",
-        "💰 Profitability",
-        "🎯 RWA Optimization",
-        "📉 RWA Reduction Analysis"
-    ])
-    
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+        [
+            "📌 RWA Snapshot",
+            "📊 Portfolio Overview",
+            "⚠️ Risk Analytics",
+            "💳 Exposure & Balances",
+            "🏛️ Capital Requirements",
+            "💰 Profitability",
+            "🎯 Optimization & Reduction",
+        ]
+    )
+
     with tab1:
-        st.header("Portfolio Overview")
-        plot_portfolio_overview(df_filtered)
-    
+        plot_rwa_summary_charts(df_filtered, rwa_reduction)
+
     with tab2:
-        st.header("Risk Analytics")
-        plot_risk_analytics(df_filtered)
-    
+        plot_portfolio_overview(df_filtered)
+
     with tab3:
-        st.header("Exposure & Balance Analysis")
-        plot_exposure_analysis(df_filtered)
-    
+        plot_risk_analytics(df_filtered)
+
     with tab4:
-        st.header("Capital Requirements & Regulatory Metrics")
-        plot_capital_requirements(df_filtered)
-    
+        plot_exposure_analysis(df_filtered)
+
     with tab5:
-        st.header("Profitability & Performance Analysis")
-        plot_profitability_analysis(df_filtered)
-    
+        plot_capital_requirements(df_filtered)
+
     with tab6:
-        st.header("RWA Optimization Pathways")
-        plot_optimization_scenarios(df_filtered)
-    
+        plot_profitability_analysis(df_filtered)
+
     with tab7:
-        st.header("RWA Reduction Analysis - Multi-Level Breakdown")
+        plot_optimization_scenarios(df_filtered, rwa_reduction)
+        st.markdown("---")
         plot_rwa_reduction_analysis(df_filtered)
-    
-    # Footer with export options
+
     st.markdown("---")
     st.subheader("📥 Export & Download")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("Export Filtered Portfolio (CSV)"):
-            csv = df_filtered.to_csv(index=False)
-            st.download_button(
-                label="Download Portfolio CSV",
-                data=csv,
-                file_name=f"pnc_portfolio_filtered_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-    
-    with col2:
-        if st.button("Export Summary Report (CSV)"):
-            summary = df_filtered.groupby('income_segment').agg({
-                'ead_b': 'sum',
-                'total_cc_rwa_b': 'sum',
-                'pd': 'mean',
-                'nco_rate': 'mean',
-                'expected_loss_b': 'sum',
-                'net_income_b': 'sum',
-                'tier1_requirement_b': 'sum'
-            })
-            summary_csv = summary.to_csv()
-            st.download_button(
-                label="Download Summary CSV",
-                data=summary_csv,
-                file_name=f"pnc_summary_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
-    
-    with col3:
-        st.info(f"**Filtered Data**: {len(df_filtered):,} / {len(df):,} accounts ({len(df_filtered)/len(df)*100:.1f}%)")
-    
-    # Profit Insight Footer
-    st.markdown("""
-    <div class='pi-footer'>
-        <strong>PROFIT INSIGHT</strong> Basel RWA Analytics Platform<br/>
-        PNC Bank Credit Card Portfolio Analysis | US Standardized Approach (12 CFR Part 3)<br/>
-        Dashboard Version 1.0 | Last Updated: {date}<br/>
-        <em>Proprietary & Confidential</em>
-    </div>
-    """.format(date=datetime.now().strftime('%Y-%m-%d')), unsafe_allow_html=True)
-    
-    # Sidebar info
+
+    col_a, col_b, col_c = st.columns(3)
+
+    with col_a:
+        csv_portfolio = df_filtered.to_csv(index=False)
+        st.download_button(
+            label="Download Filtered Portfolio CSV",
+            data=csv_portfolio,
+            file_name=f"pnc_portfolio_filtered_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
+
+    with col_b:
+        summary = df_filtered.groupby("income_segment").agg(
+            {
+                "ead_b": "sum",
+                "total_cc_rwa_b": "sum",
+                "pd": "mean",
+                "nco_rate": "mean",
+                "expected_loss_b": "sum",
+                "net_income_b": "sum",
+                "tier1_requirement_b": "sum",
+            }
+        )
+        summary_csv = summary.to_csv()
+        st.download_button(
+            label="Download Summary CSV",
+            data=summary_csv,
+            file_name=f"pnc_summary_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv",
+        )
+
+    with col_c:
+        st.info(
+            f"Filtered Accounts: {len(df_filtered):,} / {len(df):,}\n\n"
+            f"Scenario: {filters['scenario_type']}"
+        )
+
+    st.markdown(
+        f"""
+        <div class='pi-footer'>
+            <strong>PROFIT INSIGHT</strong> Basel RWA Analytics Platform<br/>
+            PNC Bank Credit Card Portfolio Analysis | US Standardized Approach (12 CFR Part 3)<br/>
+            Dashboard Version 2.0 | Last Updated: {datetime.now().strftime('%Y-%m-%d')}<br/>
+            <em>Proprietary & Confidential</em>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.sidebar.markdown("---")
     st.sidebar.info(
         f"**Dashboard Info**\n\n"
         f"- Filtered Accounts: {len(df_filtered):,}\n"
         f"- Total Portfolio: {len(df):,}\n"
         f"- Stress Scenario: {filters['scenario_type']}\n"
-        f"- Last Refresh: {datetime.now().strftime('%H:%M:%S')}\n\n"
-        f"*Powered by Profit Insight*"
+        f"- Last Refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
+
 
 if __name__ == "__main__":
     main()
