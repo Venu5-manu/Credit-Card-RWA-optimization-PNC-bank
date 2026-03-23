@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 # =============================================================================
 
 st.set_page_config(
-    page_title="Profit Insight | Basel RWA Analytics - Credit Card Portfolio",
+    page_title="Profit Insight | Basel RWA Analytics- Credit Cards",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -156,7 +156,7 @@ def load_data():
         try:
             from pnc_indusind_data_generator import ProfitInsightCCDataGenerator
 
-            generator = ProfitInsightCCDataGenerator(n_cards=100_000)
+            generator = ProfitInsightCCDataGenerator(n_accounts=100_000)
             df = generator.generate_dataset()
             return df, "Generated 100K dataset from generator file"
         except Exception as exc:
@@ -398,10 +398,10 @@ def calculate_rwa_reduction(df):
     if len(eligible_od) > 0:
         od_conversion_rate = 0.20
         netting_coverage = 0.80
-        od_cards = eligible_od.sample(
+        od_accounts = eligible_od.sample(
             frac=min(od_conversion_rate, 1.0), random_state=42
         )
-        od_ead_reduction = od_cards["ead_b"].sum() * netting_coverage
+        od_ead_reduction = od_accounts["ead_b"].sum() * netting_coverage
         rwa_saved_overdraft = od_ead_reduction * 1.0
     else:
         rwa_saved_overdraft = 0.0
@@ -585,7 +585,7 @@ def plot_portfolio_overview(df):
             x="fico_score",
             nbins=50,
             title="FICO Score Distribution",
-            labels={"fico_score": "FICO Score", "count": "Number of cards"},
+            labels={"fico_score": "FICO Score", "count": "Number of Cards"},
             color_discrete_sequence=["#4A90E2"],
         )
         fig.update_layout(title_font_color="#1B3B6F")
@@ -605,7 +605,7 @@ def plot_portfolio_overview(df):
             x="utilization_rate",
             nbins=50,
             title="Credit Utilization Rate Distribution",
-            labels={"utilization_rate": "Utilization Rate", "count": "Number of cards"},
+            labels={"utilization_rate": "Utilization Rate", "count": "Number of Cards"},
             color_discrete_sequence=["#2C5282"],
         )
         fig.update_layout(title_font_color="#1B3B6F", xaxis_tickformat=".0%")
@@ -710,7 +710,7 @@ def plot_risk_analytics(df):
             "FICO vs PD scatter explanation",
             "Individual account FICO score.",
             "Individual account probability of default.",
-            "Points further left and higher up are weaker-quality cards. Patterns by color show whether transactors and revolvers behave differently.",
+            "Points further left and higher up are weaker-quality Cards. Patterns by color show whether transactors and revolvers behave differently.",
             "This chart helps validate the risk relationship between score quality and default risk, while also showing behavior-type clustering.",
         )
 
@@ -1121,9 +1121,9 @@ def plot_optimization_scenarios(df, rwa_reduction):
                 "Category": [
                     "Eligible for Limit Reduction",
                     "Eligible for Overdraft Conversion",
-                    "All Other cards",
+                    "All Other Cards",
                 ],
-                "cards": [
+                "Cards": [
                     int(df["eligible_for_limit_reduction"].sum()),
                     int(df["eligible_for_overdraft_conversion"].sum()),
                     int(len(df) - df["eligible_for_limit_reduction"].sum()),
@@ -1133,7 +1133,7 @@ def plot_optimization_scenarios(df, rwa_reduction):
 
         fig = px.pie(
             optimization_stats,
-            values="cards",
+            values="Cards",
             names="Category",
             title="Optimization Eligibility",
             color_discrete_sequence=["#1B3B6F", "#D4AF37", "#9CA3AF"],
@@ -1363,7 +1363,7 @@ def main():
     current_rwa = rwa_reduction["current_rwa"]
 
     with col1:
-        st.metric("Total cards", f"{len(df_filtered):,}")
+        st.metric("Total Cards", f"{len(df_filtered):,}")
 
     with col2:
         st.metric("Total EAD", format_currency(df_filtered["ead_b"].sum()))
@@ -1502,7 +1502,7 @@ def main():
 
     with col_c:
         st.info(
-            f"Filtered cards: {len(df_filtered):,} / {len(df):,}\n\n"
+            f"Filtered Cards: {len(df_filtered):,} / {len(df):,}\n\n"
             f"Scenario: {filters['scenario_type']}"
         )
 
@@ -1521,7 +1521,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.info(
         f"**Dashboard Info**\n\n"
-        f"- Filtered cards: {len(df_filtered):,}\n"
+        f"- Filtered Cards: {len(df_filtered):,}\n"
         f"- Total Portfolio: {len(df):,}\n"
         f"- Stress Scenario: {filters['scenario_type']}\n"
         f"- Last Refresh: {datetime.now().strftime('%H:%M:%S')}"
