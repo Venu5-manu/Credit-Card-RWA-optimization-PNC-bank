@@ -410,7 +410,7 @@ def render_chart_with_explainer(
     interpretation_text,
     insight_text,
 ):
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     with st.expander(f"📘 {expander_title}", expanded=False):
         st.markdown(f"**X-axis:** {x_axis_text}")
         st.markdown(f"**Y-axis:** {y_axis_text}")
